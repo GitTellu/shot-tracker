@@ -7,6 +7,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Shot Tracker">
 <meta name="theme-color" content="#0f5132">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>Shot Tracker</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -109,7 +112,8 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 #capOverlay{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px}
 .capBox{background:#fff;border-radius:18px;padding:22px;text-align:center;width:min(320px,100%)}
 .capBox .big{font-size:52px;font-weight:900}
-.capBox .btn{margin-top:14px}
+.capBox .stack{margin-top:14px}
+.pill.stale{color:#777}
 #toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 64px);z-index:4000;background:#111;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700;font-size:15px;max-width:calc(100% - 32px);box-shadow:0 4px 14px rgba(0,0,0,.35);text-align:center}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
@@ -161,10 +165,16 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 
 <div id="capOverlay" hidden>
   <div class="capBox">
-    <div>Locking GPS position</div>
+    <div id="capTitle">Locking GPS position</div>
     <div class="big" id="capCount">4</div>
     <div class="sub" id="capInfo">Hold still</div>
-    <button class="btn ghost" id="capSkip">Use now</button>
+    <div class="stack">
+      <button class="btn ghost" id="capSkip">Use now</button>
+      <button class="btn sec" id="capStale" hidden>Use last fix</button>
+      <button class="btn sec" id="capWait" hidden>Wait 5 s more</button>
+      <button class="btn pri" id="capAnyway" hidden>Record anyway</button>
+      <button class="btn ghost" id="capCancel">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -203,6 +213,8 @@ var SOURCES = {
     url:function(z,x,y){ return MAPBOX_TILE + z + '/' + x + '/' + y + '@2x.jpg80?access_token=' + encodeURIComponent(S.settings.mapboxToken); }}
 };
 var TRAIL_MIN_STEP_M = 3;
+var WEAK_ACC_M = 20;          // above this median accuracy the app asks before recording
+var STALE_FIX_MS = 5000;      // pill turns grey when the newest fix is older than this
 var TRAIL_MAX_ACC_M = 20;
 
 /* ---------- helpers ---------- */
@@ -235,53 +247,129 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-function defaults(){ return {v:1, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:true}, rounds:[], activeId:null, offlineAreas:[]}; }
-function load(){
+var APP_VERSION = '1.0.0', SCHEMA = 2;
+function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:true}, rounds:[], activeId:null, playingId:null, offlineAreas:[]}; }
+function normalize(j){
   var d = defaults();
-  try {
-    var j = JSON.parse(localStorage.getItem(KEY));
-    if (j && j.v === 1) { j.settings = Object.assign(d.settings, j.settings || {}); j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || []; return j; }
-  } catch(e) {}
-  return d;
+  if (!j || j.v !== 1) return d;
+  j.settings = Object.assign(d.settings, j.settings || {}); j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || [];
+  if (!('playingId' in j)) j.playingId = null;
+  j.schema = SCHEMA;
+  return j;
 }
-/* Breadcrumb trails live under their own key per round, so the main record stays small. */
-function trailKey(id){ return 'gst.trail.' + id; }
-var trails = {};
+
+/* Storage: IndexedDB (large quota, can be marked persistent). Falls back to localStorage only if
+   IndexedDB is unavailable. Keys: 'state' = everything except trails; 'trail:<roundId>' = breadcrumbs. */
+var store = (function(){
+  var db = null, mode = 'idb';
+  var DB = 'shot-tracker', OS = 'kv';
+  function lsKey(k){ return k === 'state' ? KEY : 'gst.' + k.replace(':', '.'); } // state -> gst.v1, trail:x -> gst.trail.x
+  function req(r){ return new Promise(function(res, rej){ r.onsuccess = function(){ res(r.result); }; r.onerror = function(){ rej(r.error); }; }); }
+  return {
+    open:function(){
+      if (!('indexedDB' in window)){ mode = 'ls'; return Promise.resolve(mode); }
+      return new Promise(function(res){
+        var q; try { q = indexedDB.open(DB, 1); } catch(e){ mode = 'ls'; return res(mode); }
+        q.onupgradeneeded = function(){ q.result.createObjectStore(OS); };
+        q.onsuccess = function(){ db = q.result; res(mode); };
+        q.onerror = q.onblocked = function(){ mode = 'ls'; res(mode); };
+      });
+    },
+    mode:function(){ return mode; },
+    get:function(k){
+      if (mode === 'ls'){ try { return Promise.resolve(JSON.parse(localStorage.getItem(lsKey(k)))); } catch(e){ return Promise.resolve(null); } }
+      return req(db.transaction(OS, 'readonly').objectStore(OS).get(k));
+    },
+    put:function(k, v){
+      if (mode === 'ls'){ try { localStorage.setItem(lsKey(k), JSON.stringify(v)); return Promise.resolve(); } catch(e){ return Promise.reject(e); } }
+      return new Promise(function(res, rej){
+        var t; try { t = db.transaction(OS, 'readwrite', {durability:'strict'}); } catch(e){ t = db.transaction(OS, 'readwrite'); }
+        t.objectStore(OS).put(v, k); // structured clone happens now, so later edits to S don't leak into this write
+        t.oncomplete = function(){ res(); }; t.onerror = t.onabort = function(){ rej(t.error); };
+      });
+    },
+    del:function(k){
+      if (mode === 'ls'){ try { localStorage.removeItem(lsKey(k)); } catch(e){} return Promise.resolve(); }
+      return new Promise(function(res){ var t = db.transaction(OS, 'readwrite'); t.objectStore(OS).delete(k); t.oncomplete = t.onerror = function(){ res(); }; });
+    },
+    keys:function(){
+      if (mode === 'ls'){
+        var out = []; for (var i = 0; i < localStorage.length; i++){ var k = localStorage.key(i); if (k === KEY) out.push('state'); else if (k.indexOf('gst.trail.') === 0) out.push('trail:' + k.slice(10)); }
+        return Promise.resolve(out);
+      }
+      return req(db.transaction(OS, 'readonly').objectStore(OS).getAllKeys());
+    }
+  };
+})();
+
+var S = defaults(), booted = false;
+var lastSaveWarn = 0;
+function warnSave(){ if (Date.now() - lastSaveWarn > 10000){ lastSaveWarn = Date.now(); toast('Could not save! Phone storage for this app may be full: back up, then delete old rounds.', 6000); } }
+var bc = ('BroadcastChannel' in window) ? new BroadcastChannel('shot-tracker') : null;
+function save(){
+  if (!booted) return;
+  store.put('state', S).then(function(){ if (bc) bc.postMessage('saved'); }).catch(warnSave);
+}
+
+/* Breadcrumb trails: one record per round, loaded on demand and never overwritten before they have loaded. */
+var trails = {}, trailState = {};
 function getTrail(r){
-  if (!trails[r.id]){ try { trails[r.id] = JSON.parse(localStorage.getItem(trailKey(r.id))) || []; } catch(e){ trails[r.id] = []; } }
+  if (!trails[r.id]){ trails[r.id] = []; loadTrail(r.id); }
   return trails[r.id];
 }
-var lastSaveWarn = 0;
-function warnSave(){ if (Date.now() - lastSaveWarn > 10000){ lastSaveWarn = Date.now(); toast('Could not save! Phone storage for this app is full: back up, then delete old rounds.', 6000); } }
-function saveTrail(r){ if (!r) return; try { localStorage.setItem(trailKey(r.id), JSON.stringify(getTrail(r))); } catch(e){ warnSave(); } }
-function migrateTrails(st){ // older versions kept the trail inside each round
-  var moved = false;
-  st.rounds.forEach(function(r){ if (r.trail){ if (r.trail.length){ try { localStorage.setItem(trailKey(r.id), JSON.stringify(r.trail)); } catch(e){} } delete r.trail; moved = true; } });
-  return moved;
+function loadTrail(id){
+  if (trailState[id]) return;
+  trailState[id] = 'loading';
+  store.get('trail:' + id).then(function(v){
+    trailState[id] = 'ready';
+    if (v && v.length){ trails[id] = v.concat(trails[id] || []); var r = active(); if (r && r.id === id) trailLine.setLatLngs(trails[id].map(function(p){ return [p[0], p[1]]; })); }
+  }).catch(function(){ trailState[id] = 'ready'; });
 }
-var S = load();
-function save(){
-  try { localStorage.setItem(KEY, JSON.stringify(S)); }
-  catch(e){ warnSave(); }
-}
-if (migrateTrails(S)) save();
+function saveTrail(r){ if (!r || trailState[r.id] !== 'ready') return; store.put('trail:' + r.id, trails[r.id] || []).catch(warnSave); }
 var trailDirty = false;
-setInterval(function(){ if (trailDirty){ trailDirty = false; saveTrail(active()); } }, 10000);
+setInterval(function(){ if (trailDirty && booted){ trailDirty = false; saveTrail(active()); } }, 10000);
+
+/* One-time move from the localStorage format used by earlier versions. */
+function migrateFromLocal(){
+  var raw; try { raw = localStorage.getItem(KEY); } catch(e){ return Promise.resolve(null); }
+  if (!raw) return Promise.resolve(null);
+  var j; try { j = JSON.parse(raw); } catch(e){ return Promise.resolve(null); }
+  if (!j || j.v !== 1) return Promise.resolve(null);
+  var trailMap = {};
+  (j.rounds || []).forEach(function(r){
+    if (r.trail){ if (r.trail.length) trailMap[r.id] = r.trail; delete r.trail; }
+    try { var t = JSON.parse(localStorage.getItem('gst.trail.' + r.id)); if (t && t.length) trailMap[r.id] = t; } catch(e){}
+  });
+  j = normalize(j);
+  var writes = [store.put('state', j)].concat(Object.keys(trailMap).map(function(id){ return store.put('trail:' + id, trailMap[id]); }));
+  return Promise.all(writes).then(function(){ return store.get('state'); }).then(function(back){
+    if (!back || back.rounds.length !== j.rounds.length) throw new Error('verify');
+    // verified in IndexedDB: free the old localStorage copy (it shares a small quota with other apps on this site)
+    try { localStorage.removeItem(KEY); Object.keys(trailMap).forEach(function(id){ localStorage.removeItem('gst.trail.' + id); });
+      (j.rounds || []).forEach(function(r){ localStorage.removeItem('gst.trail.' + r.id); }); } catch(e){}
+    return back;
+  });
+}
+
 /* If another open copy of the app (tab or home-screen icon) saves, pick up its data instead of overwriting it later. */
-window.addEventListener('storage', function(e){
-  if (e.key !== KEY || !e.newValue) return;
-  S = load(); trails = {};
-  if (typeof setBase === 'function'){ setBase(); renderHole(false); }
-  toast('Updated with changes from another open copy of the app.');
-});
+if (bc) bc.onmessage = function(){
+  store.get('state').then(function(st){
+    if (!st) return;
+    S = normalize(st); trails = {}; trailState = {};
+    setBase(); renderHole(false);
+    toast('Updated with changes from another open copy of the app.');
+  });
+};
 
 function active(){ for (var i=0;i<S.rounds.length;i++) if (S.rounds[i].id === S.activeId) return S.rounds[i]; return null; }
 function curHole(){ var r = active(); return r ? r.holes[r.cur] : null; }
 function nextN(n){ return n >= 18 ? 1 : n + 1; }
 function newRound(course){
   var r = {id:uid(), course:course || '', started:Date.now(), holes:[{n:1, shots:[], green:null}], cur:0};
-  S.rounds.unshift(r); S.activeId = r.id; save(); return r;
+  S.rounds.unshift(r); S.activeId = r.id; S.playingId = r.id; trailState[r.id] = 'ready'; trails[r.id] = [];
+  save(); return r;
 }
+function markPlaying(r){ S.playingId = r.id; r.lastAt = Date.now(); }
 function shotEnd(h, i){
   if (i < h.shots.length - 1) return {pt:h.shots[i+1], type:'next shot'};
   if (h.green) return {pt:h.green, type:'green'};
@@ -336,7 +424,6 @@ function setBase(){
   }
   baseLayer.addTo(map);
 }
-setBase();
 
 var trailLine = L.polyline([], {color:'#1e88e5', weight:3, opacity:0.65}).addTo(map);
 var holeLayer = L.layerGroup().addTo(map);
@@ -356,16 +443,19 @@ var firstFix = true;
 function gpsPill(){
   var el = $('#gps');
   if (!fix){ return; }
+  var age = Date.now() - fix.t;
+  if (age > STALE_FIX_MS){ el.className = 'pill stale'; el.textContent = 'GPS ' + Math.round(age / 1000) + ' s old'; return; }
   var a = fix.acc;
   el.className = 'pill ' + (a <= 5 ? 'good' : a <= 10 ? 'fair' : 'poor');
   el.textContent = 'GPS ±' + r0(yd(a)) + ' yd';
 }
-function onPos(p){
-  var c = p.coords;
-  fix = {lat:c.latitude, lng:c.longitude, acc:c.accuracy, t:Date.now()};
-  recent.push(fix);
-  while (recent.length && fix.t - recent[0].t > 15000) recent.shift();
-  if (cap) cap.samples.push(fix);
+setInterval(gpsPill, 1000);
+function onPos(p, requested){
+  var c = p.coords, now = Date.now(), raw = p.timestamp || now, pt = Math.abs(raw - now) > 30000 ? now : raw; // ignore a badly skewed clock
+  fix = {lat:c.latitude, lng:c.longitude, acc:c.accuracy, t:now, pt:pt, lag:Math.max(0, now - pt)};
+  // A capture accepts: the answer to the fresh-fix request made at the tap (maximumAge 0), or routine
+  // updates received after the tap whose position time is no more than 2 s before it.
+  if (cap && now >= cap.start && (requested === true || pt >= cap.start - 2000)) cap.samples.push(fix);
 
   var ll = [fix.lat, fix.lng];
   youDot.setLatLng(ll); accCircle.setLatLng(ll).setRadius(fix.acc);
@@ -374,8 +464,8 @@ function onPos(p){
   else if (follow){ map.panTo(ll, {animate:true}); }
 
   var r = active();
-  // only record the trail for a round started in the last 12 h, so viewing an old round never extends it
-  if (r && fix.acc <= TRAIL_MAX_ACC_M && Date.now() - r.started < 12 * 3600 * 1000){
+  // only the round actually being played gets a trail (not one opened just to look at), and not after 3 h idle
+  if (r && booted && r.id === S.playingId && fix.acc <= TRAIL_MAX_ACC_M && Date.now() - (r.lastAt || r.started) < 3 * 3600 * 1000){
     var tr = getTrail(r), last = tr[tr.length - 1];
     // step at least the reported accuracy, so GPS jitter while standing still doesn't pile up points
     if (!last || distM({lat:last[0], lng:last[1]}, fix) >= Math.max(TRAIL_MIN_STEP_M, fix.acc)){
@@ -397,48 +487,72 @@ function startGPS(){
   navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:0, timeout:30000});
 }
 
-/* Position capture: averages fixes for N seconds, weighting by 1/accuracy^2.
-   Reported accuracy is the median of the samples: GPS errors are correlated over
-   seconds, so averaging smooths jitter but is not assumed to shrink the error. */
-/* Only fixes that arrive after the tap are averaged, so positions logged while you were
-   still walking up to the ball never leak in. If none arrive, the latest fix is used. */
-function startCapture(){ cap = {start:Date.now(), samples:[]}; }
+/* Position capture.
+   - Only fixes taken after the tap count; the app also asks the phone for a brand-new fix at the tap.
+   - Fixes are averaged, weighted by 1/accuracy^2. The accuracy recorded is the median of the samples:
+     GPS errors are correlated over seconds, so averaging smooths jitter but is not assumed to shrink the error.
+   - No fresh fix yet: the app keeps waiting and says so. Using an older fix is an explicit choice and is flagged.
+   - Weak fix (median worse than WEAK_ACC_M): the app asks, and never blocks. */
+function requestFresh(){ try { navigator.geolocation.getCurrentPosition(function(p){ onPos(p, true); }, function(){}, {enableHighAccuracy:true, maximumAge:0, timeout:15000}); } catch(e){} }
+function startCapture(){ cap = {start:Date.now(), samples:[]}; requestFresh(); }
 function combine(samples){
   var good = samples.filter(function(f){ return f.acc <= 50; });
   if (good.length) samples = good;
-  if (!samples.length){
-    if (fix && Date.now() - fix.t < 20000) samples = [fix]; else return null;
-  }
+  if (!samples.length) return null;
   var sw = 0, la = 0, lo = 0;
   samples.forEach(function(f){ var w = 1 / Math.pow(Math.max(f.acc, 1), 2); sw += w; la += f.lat * w; lo += f.lng * w; });
   var accs = samples.map(function(f){ return f.acc; }).sort(function(a,b){ return a-b; });
   var m = accs.length, med = m % 2 ? accs[(m-1)/2] : (accs[m/2-1] + accs[m/2]) / 2;
-  return {lat:la/sw, lng:lo/sw, acc:+med.toFixed(1), n:samples.length};
+  var lags = samples.map(function(f){ return f.lag || 0; }).sort(function(a,b){ return a-b; });
+  return {lat:la/sw, lng:lo/sw, acc:+med.toFixed(1), n:samples.length, lag:lags[Math.floor((lags.length - 1) / 2)]};
 }
+window.__combine = combine;
 function awaitCapture(){
   return new Promise(function(resolve){
     if (!cap) startCapture();
-    var need = S.settings.avgSeconds * 1000, iv = null, finished = false;
-    function done(){
-      if (finished) return; finished = true;
-      if (iv) clearInterval(iv);
-      $('#capOverlay').hidden = true;
-      var c = cap; cap = null;
-      resolve(combine(c ? c.samples : []));
-    }
+    var need = S.settings.avgSeconds * 1000, iv = null, finished = false, phase = 'avg', extraUntil = 0, lastAsk = Date.now();
+    var ov = $('#capOverlay'), bSkip = $('#capSkip'), bStale = $('#capStale'), bWait = $('#capWait'), bAny = $('#capAnyway');
+    function fresh(){ return cap ? cap.samples.length : 0; }
+    function finish(res){ if (finished) return; finished = true; if (iv) clearInterval(iv); ov.hidden = true; cap = null; resolve(res); }
+    function show(title, big, info, b){ $('#capTitle').textContent = title; $('#capCount').textContent = big; $('#capInfo').textContent = info;
+      bSkip.hidden = !b.skip; bStale.hidden = !b.stale; bWait.hidden = !b.wait; bAny.hidden = !b.anyway; }
+    function accept(){ var pos = combine(cap.samples); if (!pos) return; pos.stale = false; pos.ageS = 0; pos.weak = pos.acc > WEAK_ACC_M; finish(pos); }
     function tick(){
-      var left = need - (Date.now() - cap.start);
-      if (left <= 0){ done(); return; }
-      $('#capCount').textContent = Math.ceil(left / 1000);
-      $('#capInfo').textContent = cap.samples.length + ' GPS fix' + (cap.samples.length === 1 ? '' : 'es') + ' so far. Hold still.';
+      if (finished) return;
+      var el = Date.now() - cap.start, n = fresh();
+      if (phase === 'avg'){
+        if (el < need){ show('Locking GPS position', Math.ceil((need - el) / 1000), n + ' fresh fix' + (n === 1 ? '' : 'es') + ' so far. Hold still.', {skip:n > 0}); return; }
+        if (n === 0) phase = 'wait';
+        else if (combine(cap.samples).acc > WEAK_ACC_M) phase = 'weak';
+        else { accept(); return; }
+      }
+      if (phase === 'wait'){
+        if (n > 0){ phase = 'avg'; need = 0; tick(); return; }  // a fresh fix arrived: use it
+        if (Date.now() - lastAsk > 10000){ lastAsk = Date.now(); requestFresh(); }
+        var age = fix ? Math.round((Date.now() - fix.t) / 1000) : null;
+        show('Still getting your position', '…', age == null ? 'No GPS fix yet. Open sky helps.' : 'Newest fix is ' + age + ' s old (±' + r0(yd(fix.acc)) + ' yd). Waiting for a fresh one.', {stale:!!fix});
+        if (fix) bStale.textContent = 'Use last fix (' + age + ' s old)';
+        return;
+      }
+      if (phase === 'weak'){
+        var pos = combine(cap.samples);
+        if (extraUntil && Date.now() < extraUntil){ show('Improving position', Math.ceil((extraUntil - Date.now()) / 1000), 'GPS ±' + r0(yd(pos.acc)) + ' yd (phone estimate). Hold still.', {}); return; }
+        if (extraUntil && pos.acc <= WEAK_ACC_M){ accept(); return; }
+        extraUntil = 0;
+        show('Weak GPS', '±' + r0(yd(pos.acc)) + ' yd', 'That is the phone\'s own estimate. Record it now and drag the marker later if needed, or wait a few seconds.', {wait:true, anyway:true});
+      }
     }
-    tick();
-    if (finished) return;
-    $('#capOverlay').hidden = false;
-    $('#capSkip').onclick = done;
-    iv = setInterval(tick, 200);
+    bSkip.onclick = function(){ if (fresh() > 0){ need = 0; tick(); } };
+    bStale.onclick = function(){ if (!fix) return; finish({lat:fix.lat, lng:fix.lng, acc:fix.acc, n:0, lag:fix.lag, stale:true, ageS:Math.round((Date.now() - fix.t) / 1000), weak:fix.acc > WEAK_ACC_M}); };
+    bWait.onclick = function(){ extraUntil = Date.now() + 5000; tick(); };
+    bAny.onclick = function(){ accept(); };
+    $('#capCancel').onclick = function(){ finish(null); };
+    ov.hidden = false; tick();
+    if (!finished) iv = setInterval(tick, 200);
   });
 }
+function gpsQ(pos){ var q = {lagMs:pos.lag || 0}; if (pos.stale){ q.stale = true; q.ageS = pos.ageS; } if (pos.weak) q.weak = true; return q; }
+function gpsNote(pos){ return pos.stale ? ' (old GPS fix, ' + pos.ageS + ' s)' : pos.weak ? ' (weak GPS)' : ''; }
 
 /* ---------- wake lock ---------- */
 var wakeLock = null;
@@ -586,6 +700,7 @@ function goNext(){
   save(); renderHole(true);
 }
 function onHit(){
+  if (!booted) return;
   keepAwake();
   var r = active();
   if (r && !r.keepOpen && Date.now() - r.started > 12 * 3600 * 1000){
@@ -620,17 +735,18 @@ function onHit(){
       closeSheet(true);
       var usePlan = plan ? {lat:plan.aim.lat, lng:plan.aim.lng, club:plan.club, shape:plan.pat.shape, L:plan.pat.L, R:plan.pat.R, S:plan.pat.S, G:plan.pat.G} : null;
       awaitCapture().then(function(pos){
-        if (!pos){ toast('No GPS fix yet. Wait for the GPS pill to show a value, then try again.', 4500); return; }
+        if (!pos){ toast('Shot not recorded.'); return; }
         var prevIdx = h.shots.length - 1;
-        var shot = {id:uid(), club:club, lie:lie, lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), strike:null, miss:[], excluded:false};
+        var shot = Object.assign({id:uid(), club:club, lie:lie, lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), strike:null, miss:[], excluded:false}, gpsQ(pos));
+        markPlaying(r);
         if (usePlan) shot.plan = usePlan;
         h.shots.push(shot);
         if (usePlan) endPlan(true);
         save(); follow = true; renderHole(false);
         if (prevIdx >= 0){
           var p = h.shots[prevIdx], pr = planResultFor(h, prevIdx);
-          toast('Shot ' + (prevIdx + 1) + ' (' + p.club + '): ' + r0(shotDistYd(h, prevIdx)) + ' yd' + (pr ? ' · ' + missText(pr) + ' of aim' + (pr.inside ? ' · inside pattern' : ' · outside pattern') : ''), 4500);
-        } else toast('Tee shot logged: ' + club + (usePlan ? ' (aim saved)' : ''));
+          toast('Shot ' + (prevIdx + 1) + ' (' + p.club + '): ' + r0(shotDistYd(h, prevIdx)) + ' yd' + (pr ? ' · ' + missText(pr) + ' of aim' + (pr.inside ? ' · inside pattern' : ' · outside pattern') : '') + gpsNote(pos), 4500);
+        } else toast('Tee shot logged: ' + club + (usePlan ? ' (aim saved)' : '') + gpsNote(pos));
       });
   }
   if (planned) el.querySelector('#hitPlanned').onclick = function(){ pick(planned); };
@@ -667,8 +783,9 @@ function onGreen(){
     var isHoled = holed.checked, p = putts;
     closeSheet(true);
     awaitCapture().then(function(pos){
-      if (!pos){ toast('No GPS fix, so the hole was not finished. Try again.', 4500); return; }
-      h.green = {lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), feet:feet, putts:p == null ? (isHoled ? 0 : null) : +p, holed:isHoled};
+      if (!pos){ toast('Hole not finished.'); return; }
+      h.green = Object.assign({lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), feet:feet, putts:p == null ? (isHoled ? 0 : null) : +p, holed:isHoled}, gpsQ(pos));
+      markPlaying(active());
       var i = h.shots.length - 1, d = shotDistYd(h, i);
       save();
       var gpr = planResultFor(h, i);
@@ -696,7 +813,7 @@ function openShotEdit(h, i){
   var el = openSheet(
     '<h3>Hole ' + h.n + ' · Shot ' + (i+1) + '</h3>' +
     '<div class="sub">' + (d != null ? r0(d) + ' yd total (GPS, to ' + shotEnd(h,i).type + ')' : 'Distance pending: set by your next shot or ON GREEN') +
-      ' · GPS ±' + r0(yd(s.acc || 0)) + ' yd' + (s.moved ? ' · moved by hand' : '') + '</div>' +
+      ' · GPS ±' + r0(yd(s.acc || 0)) + ' yd (phone estimate)' + (s.moved ? ' · moved by hand' : '') + (s.stale ? ' · recorded from a ' + s.ageS + ' s old fix' : '') + (s.weak ? ' · weak GPS' : '') + '</div>' +
     (s.plan ? '<div class="sub"><b>Plan:</b> aimed ' + r0(yd(distM(s, s.plan))) + ' yd with ' + esc(s.plan.club) + ' · pattern ' + patText(s.plan) +
       (planResultFor(h, i) ? '<br><b>Result vs aim:</b> ' + missText(planResultFor(h, i)) + (planResultFor(h, i).inside ? ' · inside pattern' : ' · outside pattern') : '<br>Result vs aim appears after your next shot.') +
       ' <button class="link" id="dropPlan">Remove plan</button></div>' : '') +
@@ -898,7 +1015,8 @@ function renderPlanInfo(){
   var st = planStart(), d = st ? yd(distM(st, plan.aim)) : null;
   $('#planNum').textContent = (d == null ? '—' : r0(d)) + ' yd to aim';
   var sug = d != null ? suggestClub(d) : null;
-  $('#planSub').textContent = sug ? 'Your ' + sug.club + ' median: ' + r0(sug.median) + ' yd (' + sug.n + ' shots, total distance)' : 'Club suggestions appear once a club has 3+ measured shots.';
+  if (fix && Date.now() - fix.t > STALE_FIX_MS){ $('#planSub').textContent = 'Your GPS position is ' + Math.round((Date.now() - fix.t) / 1000) + ' s old. Yardage updates when a fresh fix arrives.'; }
+  else $('#planSub').textContent = sug ? 'Your ' + sug.club + ' median: ' + r0(sug.median) + ' yd (' + sug.n + ' shots, total distance)' : 'Club suggestions appear once a club has 3+ measured shots.';
   $('#planPat').textContent = patShort(plan.pat);
   Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){ b.classList.toggle('sug', !!sug && b.textContent === sug.club); });
 }
@@ -1013,8 +1131,8 @@ function openStats(){
 /* ---------- export / backup ---------- */
 function csvCell(v){ v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function toCSV(rounds){
-  var rows = [['date','course','hole','shot','club','lie','strike','miss','excluded','lat','lng','gps_acc_m','gps_fixes','moved_by_hand','distance_yd','measured_to','feet_to_pin','putts','holed',
-    'aim_lat','aim_lng','aim_yd','pattern','aim_miss_right_yd','aim_miss_long_yd','inside_pattern']];
+  var rows = [['date','course','hole','shot','club','lie','strike','miss','excluded','lat','lng','gps_acc_m','gps_fixes','moved_by_hand','gps_total_yd','measured_to','feet_to_pin','putts','holed',
+    'aim_lat','aim_lng','aim_yd','pattern','aim_miss_right_yd','aim_miss_long_yd','inside_pattern','gps_old_fix_used','gps_old_fix_age_s','gps_weak','gps_fix_lag_ms']];
   rounds.forEach(function(r){ r.holes.forEach(function(h){ h.shots.forEach(function(s, i){
     var e = shotEnd(h, i), d = e ? yd(distM(s, e.pt)) : null, lastOnGreen = i === h.shots.length - 1 && h.green;
     rows.push([isoDate(r.started), r.course, h.n, i+1, s.club, s.lie, s.strike, (s.miss || []).join('+'), s.excluded ? 1 : 0,
@@ -1024,7 +1142,7 @@ function toCSV(rounds){
         var pr = planResultFor(h, i);
         return [s.plan.lat.toFixed(7), s.plan.lng.toFixed(7), yd(distM(s, s.plan)).toFixed(1), patText(s.plan),
           pr ? pr.latYd.toFixed(1) : '', pr ? pr.lonYd.toFixed(1) : '', pr ? (pr.inside ? 1 : 0) : ''];
-      })()));
+      })(), [s.stale ? 1 : 0, s.stale ? s.ageS : '', s.weak ? 1 : 0, s.lagMs == null ? '' : s.lagMs]));
   }); }); });
   return rows.map(function(row){ return row.map(csvCell).join(','); }).join('\n');
 }
@@ -1057,7 +1175,7 @@ function openRounds(){
         if (b.dataset.a === 'open'){ S.activeId = r.id; r.cur = r.holes.length - 1; save(); closeSheet(true); renderHole(true); }
         else if (b.dataset.a === 'csv'){ download('round-' + isoDate(r.started) + '.csv', toCSV([r]), 'text/csv'); }
         else if (confirm('Delete this round permanently?')){
-          S.rounds.splice(+b.dataset.i, 1); if (S.activeId === r.id) S.activeId = null; save(); try { localStorage.removeItem(trailKey(r.id)); } catch(e){} delete trails[r.id]; renderHole(false); draw();
+          S.rounds.splice(+b.dataset.i, 1); if (S.activeId === r.id) S.activeId = null; if (S.playingId === r.id) S.playingId = null; save(); store.del('trail:' + r.id); delete trails[r.id]; delete trailState[r.id]; renderHole(false); draw();
         }
       };
     });
@@ -1136,8 +1254,17 @@ function openMenu(){
   el.querySelector('#mOffline').onclick = function(){ closeSheet(true); openOffline(); };
   el.querySelector('#mSettings').onclick = function(){ closeSheet(true); openSettings(); };
   el.querySelector('#mCsv').onclick = function(){ download('shots-' + isoDate(Date.now()) + '.csv', toCSV(S.rounds), 'text/csv'); };
-  el.querySelector('#mBackup').onclick = function(){ var all = {}; S.rounds.forEach(function(r){ all[r.id] = getTrail(r); });
-    download('shot-tracker-backup-' + isoDate(Date.now()) + '.json', JSON.stringify(Object.assign({}, S, {trails:all})), 'application/json'); };
+  el.querySelector('#mBackup').onclick = function(){
+    if (trailDirty){ trailDirty = false; saveTrail(active()); }
+    store.keys().then(function(keys){
+      var tk = keys.filter(function(k){ return String(k).indexOf('trail:') === 0; });
+      return Promise.all(tk.map(function(k){ return store.get(k); })).then(function(vals){
+        var all = {}; tk.forEach(function(k, i){ all[k.slice(6)] = vals[i] || []; });
+        S.rounds.forEach(function(r){ if (trails[r.id] && trails[r.id].length && trailState[r.id] === 'ready') all[r.id] = trails[r.id]; });
+        download('shot-tracker-backup-' + isoDate(Date.now()) + '.json', JSON.stringify(Object.assign({}, S, {trails:all, appVersion:APP_VERSION, exportedAt:new Date().toISOString()})), 'application/json');
+      });
+    }).catch(function(){ toast('Backup failed. Try again.'); });
+  };
   var rf = el.querySelector('#restoreFile');
   el.querySelector('#mRestore').onclick = function(){ rf.click(); };
   rf.onchange = function(){
@@ -1146,12 +1273,17 @@ function openMenu(){
       var j = JSON.parse(t);
       if (!j || j.v !== 1 || !Array.isArray(j.rounds)) throw new Error('bad');
       if (!confirm('Replace all data on this phone with the backup (' + j.rounds.length + ' rounds)?')) return;
-      j.settings = Object.assign(defaults().settings, j.settings || {}); j.offlineAreas = j.offlineAreas || [];
-      migrateTrails(j);
-      if (j.trails){ Object.keys(j.trails).forEach(function(id){ try { localStorage.setItem(trailKey(id), JSON.stringify(j.trails[id])); } catch(e){} }); delete j.trails; }
-      j.offlineAreas = j.offlineAreas || [];
-      trails = {}; if (plan) endPlan(true);
-      S = j; save(); setBase(); closeSheet(true); renderHole(true); toast('Backup restored');
+      var tmap = j.trails || {}; delete j.trails; delete j.appVersion; delete j.exportedAt;
+      (j.rounds || []).forEach(function(r){ if (r.trail){ if (r.trail.length) tmap[r.id] = r.trail; delete r.trail; } }); // older backups
+      j = normalize(j);
+      return store.keys().then(function(keys){
+        return Promise.all(keys.filter(function(k){ return String(k).indexOf('trail:') === 0; }).map(function(k){ return store.del(k); }));
+      }).then(function(){
+        return Promise.all(Object.keys(tmap).map(function(id){ return store.put('trail:' + id, tmap[id]); }));
+      }).then(function(){
+        trails = {}; trailState = {}; if (plan) endPlan(true);
+        S = j; save(); setBase(); closeSheet(true); renderHole(true); toast('Backup restored');
+      });
     }).catch(function(){ toast('That file is not a Shot Tracker backup.'); });
   };
   el.querySelector('#close').onclick = function(){ closeSheet(); };
@@ -1192,7 +1324,8 @@ function downloadArea(srcName, b, onProgress){
       var t = tiles[i++], key = src.key(t[0], t[1], t[2]);
       return cache.match(key).then(function(hit){
         if (hit && !src.ttl) return hit.blob(); // expiring sources are always refetched so every tile gets a fresh 30-day clock
-        return fetch(src.url(t[0], t[1], t[2]), {mode:'cors'}).then(function(res){
+        // cache:'reload' tells our service worker to go to the network, so a re-save really refetches
+        return fetch(src.url(t[0], t[1], t[2]), {mode:'cors', cache:src.ttl ? 'reload' : 'default'}).then(function(res){
           if (!res.ok){ httpErr++; return null; }
           return res.blob().then(function(bl){
             var stored = new Response(bl, {headers:{'Content-Type':res.headers.get('Content-Type') || 'image/jpeg', 'X-Saved-At':stamp}});
@@ -1350,7 +1483,7 @@ function openGuide(){
     '<ol>' +
       '<li><b>Wait for good GPS.</b> The pill at the top right shows accuracy. Green is good, amber is fair, red means give it a few seconds.</li>' +
       '<li><b>Plan (optional).</b> Tap ' + k('PLAN', 'plan') + '. Drag the orange target, or tap the map where you want to aim. The big number is your yards to the target. Pick the club; the pattern redraws. Use ' + k('−') + ' ' + k('+') + ' to narrow or widen it, or ' + k('Pattern') + ' to change the split.</li>' +
-      '<li><b>Hit.</b> Standing at your ball, tap ' + k('HIT SHOT', 'hit') + ', then the club (or <i>Hit planned</i>). Hold still for about 4 seconds while the app averages your position.</li>' +
+      '<li><b>Hit.</b> Standing at your ball, tap ' + k('HIT SHOT', 'hit') + ', then the club (or <i>Hit planned</i>). Hold still for about 4 seconds while the app averages fresh GPS readings. If the phone has not delivered a fresh position yet, the app waits and tells you, rather than quietly using an old one.</li>' +
       '<li><b>Walk.</b> The big number counts the yards from your last shot as you walk. Tag the strike and miss on the card if you want. It\'s optional.</li>' +
       '<li><b>Next shot.</b> At your ball, tap ' + k('HIT SHOT', 'hit') + ' again. Your last shot gets its distance, and its result against the target if you planned it.</li>' +
       '<li><b>On the green.</b> Stand at your ball, tap ' + k('ON GREEN') + ', type the feet to the pin, and add putts if you like. <i>Finish hole</i> moves you to the next hole.</li>' +
@@ -1359,6 +1492,7 @@ function openGuide(){
     '<h4>Fixing and reviewing</h4>' +
     '<ul>' +
       '<li><b>Tap a numbered pin</b> to change the club or tags, drag it to the right spot, delete it, or leave it out of your stats (punch-outs, penalties).</li>' +
+      '<li><b>Took a drop or re-teed?</b> The shot before it now measures to your drop, not to where the ball finished. Tap that shot\'s pin and choose <i>Exclude from club stats</i>.</li>' +
       '<li><b>Tap the flag</b> to edit feet to pin, putts, or reopen a hole.</li>' +
       '<li><b>Tap the hole number</b> to renumber it, for example when you start on 10. Use ' + k('‹') + ' ' + k('›') + ' to move between holes.</li>' +
       '<li>' + k('☰') + ' <i>Club distances</i> shows your averages, medians and spread, plus aim results for planned shots. <i>Export</i> and <i>Backup</i> are in the same menu.</li>' +
@@ -1367,11 +1501,11 @@ function openGuide(){
 
     '<h4>Good to know</h4>' +
     '<div class="honest"><ul style="margin:0">' +
-      '<li><b>GPS is good, not perfect.</b> Phones are typically accurate to about 5 meters (16 feet) in open sky, so any single distance can be a few yards off. Averages over many shots are where the value is. You can drag a marker to correct a bad one.</li>' +
+      '<li><b>GPS is good, not perfect.</b> Phones are typically accurate to about 5 meters (16 feet) in open sky, so any single distance can be a few yards off. The ± the app shows is the phone\'s own estimate, and real errors can be larger. Averages over many shots are where the value is. You can drag a marker to correct a bad one.</li>' +
       '<li><b>Distances are total, not carry.</b> They measure where the ball stopped, roll included.</li>' +
       '<li><b>Aim results use where the ball finished,</b> since that is where you hit your next shot from.</li>' +
       '<li><b>Keep the app on screen.</b> Phones pause GPS for web apps when the screen locks, so the breadcrumb trail has gaps then. Shots are captured when you tap, so they are not affected.</li>' +
-      '<li><b>Your data lives on this phone only.</b> Use <i>Backup</i> now and then.</li>' +
+      '<li><b>Your data lives on this phone only.</b> Use <i>Backup</i> now and then. It is a plain JSON file you own, and <i>Export</i> gives every shot as a spreadsheet.</li>' +
     '</ul></div>' +
 
     '<div class="stack"><button class="btn pri" id="close">Let\'s play</button></div>' +
@@ -1414,12 +1548,20 @@ $('#layerBtn').onclick = function(){
   toast({mapbox:'Mapbox satellite (offline in saved areas, 30 days)', usgs:'USGS satellite (offline in saved areas)', osm:'OpenStreetMap (online only, saved USGS underneath)', sat:'Esri satellite (online only, OSM and USGS underneath)'}[st.basemap]);
 };
 
-layout();
-renderHole(true);
-startGPS();
-registerSW();
-purgeExpired();
-keepAwake();
+/* ---------- boot ---------- */
+function startApp(){
+  booted = true;
+  setBase(); layout(); renderHole(true);
+  startGPS(); registerSW(); purgeExpired(); keepAwake();
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function(){});
+}
+window.__S = function(){ return S; }; window.__save = function(){ save(); };
+window.__store = store;
+window.__ready = store.open().then(function(mode){
+  if (mode !== 'idb') return store.get('state');
+  return store.get('state').then(function(st){ return st || migrateFromLocal(); });
+}).then(function(st){ S = normalize(st); }).catch(function(){ S = defaults(); })
+  .then(function(){ startApp(); return store.mode(); });
 })();
 </script>
 </body>

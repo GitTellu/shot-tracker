@@ -1,5 +1,5 @@
 /* Shot Tracker service worker: keeps the app and saved satellite imagery available offline. */
-var APP_CACHE = 'st-app-v4';
+var APP_CACHE = 'st-app-v5';
 var USGS_CACHE = 'st-tiles-usgs-v1';
 var MAPBOX_CACHE = 'st-tiles-mapbox-v1';
 var MAPBOX_TTL_MS = 30 * 24 * 3600 * 1000; // Mapbox terms: on-device cache limited to 30 days
@@ -12,7 +12,8 @@ var STATIC = [
 self.addEventListener('install', function(e){
   e.waitUntil(caches.open(APP_CACHE).then(function(c){
     return c.addAll(['./', './index.html']).then(function(){
-      return Promise.all(STATIC.map(function(u){ return c.add(u).catch(function(){}); }));
+      // everything else is best-effort, so a missing icon can never block the app from installing offline
+      return Promise.all(STATIC.concat(['./manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png', './icon-180.png']).map(function(u){ return c.add(u).catch(function(){}); }));
     });
   }).then(function(){ return self.skipWaiting(); }));
 });
@@ -31,6 +32,7 @@ self.addEventListener('fetch', function(e){
   if (url.pathname.indexOf('/v4/mapbox.satellite/') >= 0){ e.respondWith(mapboxTile(req, url)); return; }
   if (STATIC.indexOf(req.url) >= 0){ e.respondWith(cacheFirst(req)); return; }
   if (url.origin === self.location.origin && (req.mode === 'navigate' || /\/(index\.html)?$/.test(url.pathname))){ e.respondWith(appShell(req, e)); return; }
+  if (url.origin === self.location.origin && /\/(manifest\.json|icon-[\w-]+\.png)$/.test(url.pathname)){ e.respondWith(cacheFirst(req)); return; }
   // everything else (OpenStreetMap, Esri tiles) goes straight to the network, not stored by this app
 });
 
@@ -52,6 +54,7 @@ function usgsTile(req){
 /* Mapbox: only tiles you saved on purpose, and only while under 30 days old. Nothing else is stored. */
 function mapboxTile(req, url){
   var key = url.origin + url.pathname; // cache key without the access token
+  if (req.cache === 'reload' || req.cache === 'no-store') return fetch(req); // the app is re-saving: always go to the network
   return caches.open(MAPBOX_CACHE).then(function(c){
     return c.match(key).then(function(hit){
       if (hit){
