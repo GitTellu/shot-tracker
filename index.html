@@ -1,0 +1,954 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Shot Tracker">
+<meta name="theme-color" content="#0f5132">
+<title>Shot Tracker</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+:root{--g:#0f5132;--g2:#198754;--ink:#111;--mut:#555;--line:#d6d6d6;--red:#c62828}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:#e9ece9;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+button{font:inherit;color:inherit;cursor:pointer}
+#map{position:fixed;top:0;left:0;right:0;bottom:200px;background:#cfd8cf}
+#top{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;display:flex;align-items:center;gap:8px;z-index:1000;pointer-events:none}
+#top>*{pointer-events:auto}
+.ib{width:44px;height:44px;border-radius:12px;border:0;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35);font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center}
+#holeNav{display:flex;align-items:center;background:#fff;border-radius:12px;box-shadow:0 1px 5px rgba(0,0,0,.35)}
+#holeNav .ib{box-shadow:none;background:none;font-size:28px}
+#holeLabel{border:0;background:none;font-weight:800;font-size:18px;min-width:80px;height:44px}
+.pill{margin-left:auto;padding:9px 12px;border-radius:999px;font-weight:800;font-size:14px;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35);white-space:nowrap}
+.pill.good{color:#0a7a33}.pill.fair{color:#a86b00}.pill.poor{color:var(--red)}
+#fabs{position:fixed;right:10px;bottom:230px;z-index:1000;display:flex;flex-direction:column;gap:8px}
+#panel{position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -2px 12px rgba(0,0,0,.25);padding:12px 16px calc(env(safe-area-inset-bottom) + 12px);z-index:1000}
+#liveNum{font-size:46px;font-weight:900;line-height:1.05;letter-spacing:-1px}
+#liveSub{color:var(--mut);font-size:14px;margin-top:2px}
+#lastCard{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
+.lcHead{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px}
+.link{border:0;background:none;color:var(--g2);font-weight:800;padding:6px 0 6px 12px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:4px 0;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:8px 12px;border-radius:999px;border:1.5px solid #b9b9b9;background:#fff;font-size:14px;font-weight:700}
+.chip.on{background:var(--g);border-color:var(--g);color:#fff}
+.clab{flex:none;align-self:center;font-size:12px;color:var(--mut);width:46px;font-weight:700;text-transform:uppercase}
+.actions{display:grid;grid-template-columns:1fr 1.6fr;gap:10px;margin-top:10px}
+.btn{height:58px;border-radius:14px;border:0;font-size:18px;font-weight:800;letter-spacing:.3px;width:100%}
+.pri{background:var(--g2);color:#fff}.pri:active{background:var(--g)}
+.sec{background:#e8f5ec;color:var(--g);border:2px solid var(--g2)}
+.ghost{background:#f1f1f1;color:#222}
+.danger{background:#fdecea;color:var(--red);border:2px solid #f3b4ae}
+#sheetWrap{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:flex;align-items:flex-end}
+#sheet{background:#fff;width:100%;max-height:90vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px)}
+#sheet h3{margin:0 0 4px;font-size:20px}
+.sub{color:var(--mut);font-size:14px;margin-bottom:10px}
+.fl{display:block;font-size:13px;font-weight:800;color:var(--mut);text-transform:uppercase;margin:12px 0 4px}
+.fl input,.fl select,.fl textarea{display:block;width:100%;margin-top:4px;font-size:18px;padding:10px;border:1.5px solid #bbb;border-radius:10px;background:#fff;color:var(--ink);font-family:inherit;text-transform:none;font-weight:600}
+#ft{font-size:30px;font-weight:800}
+.chk{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin:14px 0}
+.chk input{width:22px;height:22px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.stack{display:grid;gap:10px;margin-top:12px}
+.clubs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.clubs button{height:58px;border-radius:12px;border:1.5px solid #c4c4c4;background:#f6f7f6;font-size:17px;font-weight:800}
+.clubs button:active{background:var(--g2);color:#fff}
+.menu button{display:block;width:100%;text-align:left;padding:15px 12px;border:0;border-bottom:1px solid var(--line);background:none;font-size:17px;font-weight:700}
+.rlist .ritem{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.ritem .rt{font-weight:800}.ritem .rs{color:var(--mut);font-size:13px;margin:2px 0 8px}
+.ritem .rb{display:flex;gap:8px}
+.ritem .rb button{flex:1;padding:9px;border-radius:10px;border:1.5px solid #bbb;background:#fff;font-weight:700;font-size:14px}
+.tag{display:inline-block;background:var(--g2);color:#fff;border-radius:6px;padding:1px 6px;font-size:11px;margin-left:6px;vertical-align:middle}
+.tblwrap{overflow-x:auto;margin-top:8px}
+table.stats{border-collapse:collapse;width:100%;font-size:15px;font-variant-numeric:tabular-nums}
+table.stats th,table.stats td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+table.stats th:first-child,table.stats td:first-child{text-align:left}
+table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
+.note{font-size:13px;color:var(--mut);line-height:1.4;margin-top:10px}
+.seg{display:flex;border:1.5px solid var(--g2);border-radius:10px;overflow:hidden;margin-top:6px}
+.seg button{flex:1;padding:10px;border:0;background:#fff;font-weight:800;color:var(--g)}
+.seg button.on{background:var(--g2);color:#fff}
+#capOverlay{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.capBox{background:#fff;border-radius:18px;padding:22px;text-align:center;width:min(320px,100%)}
+.capBox .big{font-size:52px;font-weight:900}
+.capBox .btn{margin-top:14px}
+#toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 64px);z-index:4000;background:#111;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700;font-size:15px;max-width:calc(100% - 32px);box-shadow:0 4px 14px rgba(0,0,0,.35);text-align:center}
+.pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.pin.ex{background:#9e9e9e}
+.flag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid #d32f2f;color:#d32f2f;font-weight:900;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.leaflet-tooltip.dtip{background:rgba(17,17,17,.85);color:#fff;border:0;font-weight:800;font-size:13px;padding:3px 7px;border-radius:8px;box-shadow:none}
+.leaflet-tooltip.dtip:before{display:none}
+#fatal{position:fixed;inset:0;z-index:5000;background:#fff;padding:24px;font-size:17px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<header id="top">
+  <button id="menuBtn" class="ib" aria-label="Menu">&#9776;</button>
+  <div id="holeNav">
+    <button id="prevHole" class="ib" aria-label="Previous hole">&#8249;</button>
+    <button id="holeLabel">Hole 1</button>
+    <button id="nextHole" class="ib" aria-label="Next hole">&#8250;</button>
+  </div>
+  <div id="gps" class="pill poor">GPS &hellip;</div>
+</header>
+
+<div id="fabs">
+  <button id="layerBtn" class="ib" aria-label="Map type" title="Street / Satellite">&#9707;</button>
+  <button id="centerBtn" class="ib" aria-label="Center on me" title="Center on me">&#9678;</button>
+</div>
+
+<section id="panel">
+  <div id="liveNum">&mdash;</div>
+  <div id="liveSub">Tap HIT SHOT at your ball to start.</div>
+  <div id="lastCard" hidden>
+    <div class="lcHead"><span id="lcTitle"></span><button id="lcEdit" class="link">Edit</button></div>
+    <div class="chips"><span class="clab">Strike</span><span id="lcStrike" style="display:contents"></span></div>
+    <div class="chips"><span class="clab">Miss</span><span id="lcMiss" style="display:contents"></span></div>
+  </div>
+  <div class="actions">
+    <button id="greenBtn" class="btn sec">ON GREEN</button>
+    <button id="hitBtn" class="btn pri">HIT SHOT</button>
+  </div>
+</section>
+
+<div id="sheetWrap" hidden><div id="sheet"></div></div>
+
+<div id="capOverlay" hidden>
+  <div class="capBox">
+    <div>Locking GPS position</div>
+    <div class="big" id="capCount">4</div>
+    <div class="sub" id="capInfo">Hold still</div>
+    <button class="btn ghost" id="capSkip">Use now</button>
+  </div>
+</div>
+
+<div id="toast" hidden></div>
+
+<script>
+(function(){
+'use strict';
+if (!window.L){ document.body.insertAdjacentHTML('beforeend', '<div id="fatal">The map library did not load. Check your connection and reload.</div>'); return; }
+
+/* ---------- constants ---------- */
+var KEY = 'gst.v1';
+var M_PER_YD = 0.9144;                 // exact, by definition
+var WGS84_A = 6378137;                 // semi-major axis (m)
+var WGS84_F = 1 / 298.257223563;       // flattening
+var WGS84_E2 = WGS84_F * (2 - WGS84_F);
+var DEFAULT_CLUBS = ['Driver','Mini Driver','19° UW','Heavenwood','9 Wood','4 Utility','6i','7i','8i','9i','PW','50°','54°','58°'];
+var LIES = ['Tee','Fairway','Rough','Bunker','Fringe','Other'];
+var STRIKES = ['Pure','Thin','Fat','Toe','Heel'];
+var MISSES = ['Left','Right','Short','Long','On target'];
+var MISS_OPP = {Left:'Right', Right:'Left', Short:'Long', Long:'Short'};
+var SAT_URL = 'https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=';
+var USGS_TILE = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/';
+var TILE_CACHE = 'st-tiles-usgs-v1';
+var OFFLINE_ZMIN = 14, OFFLINE_ZMAX = 18;   // z18 = ~0.46 m/pixel at 40° N, finer than the ~1 m NAIP source
+var OFFLINE_MAX_TILES = 3000;
+var TRAIL_MIN_STEP_M = 3;
+var TRAIL_MAX_ACC_M = 20;
+
+/* ---------- helpers ---------- */
+function $(s){ return document.querySelector(s); }
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function yd(m){ return m / M_PER_YD; }
+function r0(x){ return Math.round(x); }
+
+/* Distance on the WGS84 ellipsoid using local radii of curvature at the mean latitude.
+   For golf-scale distances (< 1 km) this matches a full geodesic to well under a centimetre. */
+function distM(a, b){
+  var phi = (a.lat + b.lat) / 2 * Math.PI / 180;
+  var s = Math.sin(phi), w = 1 - WGS84_E2 * s * s;
+  var Mr = WGS84_A * (1 - WGS84_E2) / Math.pow(w, 1.5);
+  var Nr = WGS84_A / Math.sqrt(w);
+  var dy = (b.lat - a.lat) * Math.PI / 180 * Mr;
+  var dx = (b.lng - a.lng) * Math.PI / 180 * Nr * Math.cos(phi);
+  return Math.hypot(dx, dy);
+}
+window.__distM = distM; // exposed for testing
+
+function isoDate(t){ var d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); }
+function niceDate(t){ return new Date(t).toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric', year:'numeric'}); }
+
+var toastTimer = null;
+function toast(msg, ms){
+  var el = $('#toast'); el.textContent = msg; el.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(function(){ el.hidden = true; }, ms || 2600);
+}
+
+/* ---------- state ---------- */
+function defaults(){ return {v:1, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', avgSeconds:4, basemap:'usgs', wake:true}, rounds:[], activeId:null, offlineAreas:[]}; }
+function load(){
+  var d = defaults();
+  try {
+    var j = JSON.parse(localStorage.getItem(KEY));
+    if (j && j.v === 1) { j.settings = Object.assign(d.settings, j.settings || {}); j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || []; return j; }
+  } catch(e) {}
+  return d;
+}
+var S = load();
+var storageOk = true;
+function save(){
+  try { localStorage.setItem(KEY, JSON.stringify(S)); storageOk = true; }
+  catch(e){ if (storageOk) toast('Could not save. Storage may be full: export a backup and delete old rounds.', 5000); storageOk = false; }
+}
+var trailDirty = false;
+setInterval(function(){ if (trailDirty){ trailDirty = false; save(); } }, 10000);
+
+function active(){ for (var i=0;i<S.rounds.length;i++) if (S.rounds[i].id === S.activeId) return S.rounds[i]; return null; }
+function curHole(){ var r = active(); return r ? r.holes[r.cur] : null; }
+function nextN(n){ return n >= 18 ? 1 : n + 1; }
+function newRound(course){
+  var r = {id:uid(), course:course || '', started:Date.now(), holes:[{n:1, shots:[], green:null}], cur:0, trail:[]};
+  S.rounds.unshift(r); S.activeId = r.id; save(); return r;
+}
+function shotEnd(h, i){
+  if (i < h.shots.length - 1) return {pt:h.shots[i+1], type:'next shot'};
+  if (h.green) return {pt:h.green, type:'green'};
+  return null;
+}
+function shotDistYd(h, i){ var e = shotEnd(h, i); return e ? yd(distM(h.shots[i], e.pt)) : null; }
+
+/* ---------- map ---------- */
+var map = L.map('map', {zoomControl:false, maxZoom:21, attributionControl:true}).setView([39.83, -98.58], 4);
+var baseLayer = null;
+function setBase(){
+  if (baseLayer) map.removeLayer(baseLayer);
+  var st = S.settings;
+  if (st.basemap === 'sat' && st.arcgisKey){
+    baseLayer = L.tileLayer(SAT_URL + encodeURIComponent(st.arcgisKey), {maxNativeZoom:19, maxZoom:21,
+      attribution:'Powered by <a href="https://www.esri.com">Esri</a> | Esri World Imagery'});
+    var warned = false;
+    baseLayer.on('tileerror', function(){ if (!warned){ warned = true; toast('Satellite tiles failed to load. Check the ArcGIS key in Settings, or your signal.', 4500); } });
+  } else if (st.basemap === 'usgs'){
+    baseLayer = L.tileLayer(USGS_TILE + '{z}/{y}/{x}', {maxNativeZoom:OFFLINE_ZMAX, maxZoom:21,
+      attribution:'Imagery: <a href="https://www.usgs.gov/programs/national-geospatial-program/national-map">USGS The National Map</a> (USDA NAIP)'});
+  } else {
+    baseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxNativeZoom:19, maxZoom:21,
+      attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'});
+  }
+  baseLayer.addTo(map);
+}
+setBase();
+
+var trailLine = L.polyline([], {color:'#1e88e5', weight:3, opacity:0.65}).addTo(map);
+var holeLayer = L.layerGroup().addTo(map);
+var liveLine = L.polyline([], {color:'#e91e63', weight:3, dashArray:'6 8', opacity:0.95}).addTo(map);
+var accCircle = L.circle([0,0], {radius:1, color:'#1e88e5', weight:1, fillOpacity:0.12, interactive:false});
+var youDot = L.circleMarker([0,0], {radius:8, color:'#fff', weight:3, fillColor:'#1e88e5', fillOpacity:1, interactive:false});
+var markers = {};
+var follow = true;
+map.on('dragstart', function(){ follow = false; });
+
+/* ---------- GPS ---------- */
+var fix = null;       // latest fix {lat,lng,acc,t}
+var recent = [];      // fixes from the last 15 s
+var cap = null;       // active position capture {start, samples}
+var firstFix = true;
+
+function gpsPill(){
+  var el = $('#gps');
+  if (!fix){ return; }
+  var a = fix.acc;
+  el.className = 'pill ' + (a <= 5 ? 'good' : a <= 10 ? 'fair' : 'poor');
+  el.textContent = 'GPS ±' + r0(yd(a)) + ' yd';
+}
+function onPos(p){
+  var c = p.coords;
+  fix = {lat:c.latitude, lng:c.longitude, acc:c.accuracy, t:Date.now()};
+  recent.push(fix);
+  while (recent.length && fix.t - recent[0].t > 15000) recent.shift();
+  if (cap) cap.samples.push(fix);
+
+  var ll = [fix.lat, fix.lng];
+  youDot.setLatLng(ll); accCircle.setLatLng(ll).setRadius(fix.acc);
+  if (!map.hasLayer(youDot)){ accCircle.addTo(map); youDot.addTo(map); }
+  if (firstFix){ firstFix = false; map.setView(ll, 18); }
+  else if (follow){ map.panTo(ll, {animate:true}); }
+
+  var r = active();
+  // only record the trail for a round started in the last 12 h, so viewing an old round never extends it
+  if (r && fix.acc <= TRAIL_MAX_ACC_M && Date.now() - r.started < 12 * 3600 * 1000){
+    var last = r.trail[r.trail.length - 1];
+    if (!last || distM({lat:last[0], lng:last[1]}, fix) >= TRAIL_MIN_STEP_M){
+      r.trail.push([+fix.lat.toFixed(7), +fix.lng.toFixed(7), Math.round(fix.t/1000)]);
+      trailLine.addLatLng(ll); trailDirty = true;
+    }
+  }
+  gpsPill(); updateLive();
+}
+function onErr(e){
+  var el = $('#gps'); el.className = 'pill poor';
+  if (e.code === 1){ el.textContent = 'GPS denied'; toast('Location permission denied. Allow location for this site in your browser settings.', 6000); }
+  else { el.textContent = 'No GPS'; }
+}
+function startGPS(){
+  if (!window.isSecureContext){ $('#gps').textContent = 'Needs HTTPS'; toast('GPS only works when this page is opened over https://', 6000); return; }
+  if (!navigator.geolocation){ $('#gps').textContent = 'No GPS'; return; }
+  navigator.geolocation.watchPosition(onPos, onErr, {enableHighAccuracy:true, maximumAge:0, timeout:30000});
+}
+
+/* Position capture: averages fixes for N seconds, weighting by 1/accuracy^2.
+   Reported accuracy is the median of the samples: GPS errors are correlated over
+   seconds, so averaging smooths jitter but is not assumed to shrink the error. */
+/* Only fixes that arrive after the tap are averaged, so positions logged while you were
+   still walking up to the ball never leak in. If none arrive, the latest fix is used. */
+function startCapture(){ cap = {start:Date.now(), samples:[]}; }
+function combine(samples){
+  var good = samples.filter(function(f){ return f.acc <= 50; });
+  if (good.length) samples = good;
+  if (!samples.length){
+    if (fix && Date.now() - fix.t < 20000) samples = [fix]; else return null;
+  }
+  var sw = 0, la = 0, lo = 0;
+  samples.forEach(function(f){ var w = 1 / Math.pow(Math.max(f.acc, 1), 2); sw += w; la += f.lat * w; lo += f.lng * w; });
+  var accs = samples.map(function(f){ return f.acc; }).sort(function(a,b){ return a-b; });
+  var m = accs.length, med = m % 2 ? accs[(m-1)/2] : (accs[m/2-1] + accs[m/2]) / 2;
+  return {lat:la/sw, lng:lo/sw, acc:+med.toFixed(1), n:samples.length};
+}
+function awaitCapture(){
+  return new Promise(function(resolve){
+    if (!cap) startCapture();
+    var need = S.settings.avgSeconds * 1000, iv = null, finished = false;
+    function done(){
+      if (finished) return; finished = true;
+      if (iv) clearInterval(iv);
+      $('#capOverlay').hidden = true;
+      var c = cap; cap = null;
+      resolve(combine(c ? c.samples : []));
+    }
+    function tick(){
+      var left = need - (Date.now() - cap.start);
+      if (left <= 0){ done(); return; }
+      $('#capCount').textContent = Math.ceil(left / 1000);
+      $('#capInfo').textContent = cap.samples.length + ' GPS fix' + (cap.samples.length === 1 ? '' : 'es') + ' so far. Hold still.';
+    }
+    tick();
+    if (finished) return;
+    $('#capOverlay').hidden = false;
+    $('#capSkip').onclick = done;
+    iv = setInterval(tick, 200);
+  });
+}
+
+/* ---------- wake lock ---------- */
+var wakeLock = null;
+function keepAwake(){
+  if (!S.settings.wake || !('wakeLock' in navigator) || document.visibilityState !== 'visible' || wakeLock) return;
+  navigator.wakeLock.request('screen').then(function(l){ wakeLock = l; l.addEventListener('release', function(){ wakeLock = null; }); }).catch(function(){});
+}
+document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'visible') keepAwake(); else save(); });
+window.addEventListener('pagehide', save);
+
+/* ---------- rendering ---------- */
+function layout(){
+  var ph = $('#panel').offsetHeight;
+  $('#map').style.bottom = Math.max(0, ph - 18) + 'px';
+  $('#fabs').style.bottom = (ph + 26) + 'px';
+  map.invalidateSize();
+}
+if (window.ResizeObserver) new ResizeObserver(layout).observe($('#panel'));
+window.addEventListener('resize', layout);
+
+function pinIcon(i, ex){ return L.divIcon({className:'', html:'<div class="pin' + (ex ? ' ex' : '') + '">' + i + '</div>', iconSize:[28,28], iconAnchor:[14,14]}); }
+var flagIcon = L.divIcon({className:'', html:'<div class="flag">&#9873;</div>', iconSize:[30,30], iconAnchor:[15,15]});
+
+function renderHole(fit){
+  holeLayer.clearLayers(); markers = {};
+  var r = active(), h = curHole();
+  $('#holeLabel').textContent = h ? 'Hole ' + h.n : 'No round';
+  trailLine.setLatLngs(r ? r.trail.map(function(p){ return [p[0], p[1]]; }) : []);
+  if (h){
+    h.shots.forEach(function(s, i){
+      var e = shotEnd(h, i);
+      if (e){
+        var d = yd(distM(s, e.pt));
+        L.polyline([[s.lat,s.lng],[e.pt.lat,e.pt.lng]], {color:s.excluded ? '#9e9e9e' : '#ff9800', weight:4, opacity:0.95})
+          .bindTooltip(r0(d) + ' yd · ' + esc(s.club), {permanent:true, direction:'center', className:'dtip'})
+          .addTo(holeLayer);
+      }
+      var m = L.marker([s.lat, s.lng], {icon:pinIcon(i+1, s.excluded), zIndexOffset:1000}).addTo(holeLayer);
+      m.on('click', function(){ openShotEdit(h, i); });
+      markers[s.id] = m;
+    });
+    if (h.green){
+      var gm = L.marker([h.green.lat, h.green.lng], {icon:flagIcon, zIndexOffset:1100}).addTo(holeLayer);
+      gm.bindTooltip((h.green.feet == null ? '?' : h.green.feet) + ' ft', {permanent:true, direction:'right', offset:[14,0], className:'dtip'});
+      gm.on('click', function(){ openGreenEdit(h); });
+      markers.green = gm;
+    }
+    if (fit){
+      var pts = h.shots.map(function(s){ return [s.lat, s.lng]; });
+      if (h.green) pts.push([h.green.lat, h.green.lng]);
+      if (fix && !h.green) pts.push([fix.lat, fix.lng]);
+      if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:[50,50], maxZoom:19}); }
+      else if (fix){ follow = true; map.setView([fix.lat, fix.lng], 18); }
+    }
+  }
+  renderLastCard(); updateLive();
+}
+
+function updateLive(){
+  var h = curHole(), num = $('#liveNum'), sub = $('#liveSub');
+  var last = h && h.shots.length ? h.shots[h.shots.length - 1] : null;
+  if (!active()){ num.textContent = '—'; sub.textContent = 'Tap HIT SHOT at your ball to start a round.'; liveLine.setLatLngs([]); return; }
+  if (!last){ num.textContent = '—'; sub.textContent = 'Hole ' + h.n + ': at the tee, tap HIT SHOT and pick a club.'; liveLine.setLatLngs([]); return; }
+  if (h.green){
+    liveLine.setLatLngs([]);
+    num.textContent = (h.green.feet == null ? '—' : h.green.feet) + ' ft';
+    sub.textContent = 'Hole ' + h.n + ' finished · ' + h.shots.length + ' shot' + (h.shots.length === 1 ? '' : 's') + ' to green' + (h.green.putts != null ? ' · ' + h.green.putts + ' putt' + (h.green.putts === 1 ? '' : 's') : '');
+    return;
+  }
+  if (!fix){ num.textContent = '—'; sub.textContent = 'Waiting for GPS…'; return; }
+  var d = yd(distM(last, fix));
+  var unc = yd(Math.hypot(last.acc || 0, fix.acc || 0));
+  num.textContent = r0(d) + ' yd';
+  sub.textContent = 'From shot ' + h.shots.length + ' (' + last.club + ') · GPS ±' + r0(unc) + ' yd';
+  liveLine.setLatLngs([[last.lat, last.lng], [fix.lat, fix.lng]]);
+}
+
+function renderLastCard(){
+  var h = curHole(), card = $('#lastCard');
+  if (!h || !h.shots.length){ card.hidden = true; return; }
+  var i = h.shots.length - 1, s = h.shots[i], d = shotDistYd(h, i);
+  card.hidden = false;
+  $('#lcTitle').textContent = 'Shot ' + (i+1) + ' · ' + s.club + (s.lie ? ' · from ' + s.lie : '') + (d != null ? ' · ' + r0(d) + ' yd' : '');
+  $('#lcEdit').onclick = function(){ openShotEdit(h, i); };
+  chips($('#lcStrike'), STRIKES, function(){ return s.strike || null; }, function(v){ s.strike = v; save(); });
+  missChips($('#lcMiss'), function(){ return s.miss || []; }, function(v){ s.miss = v; save(); });
+}
+
+function chips(el, opts, get, set){
+  function draw(){
+    var cur = get();
+    el.innerHTML = opts.map(function(o){ return '<button class="chip' + (cur === o ? ' on' : '') + '">' + esc(o) + '</button>'; }).join('');
+    Array.prototype.forEach.call(el.querySelectorAll('.chip'), function(b, i){
+      b.onclick = function(){ set(get() === opts[i] ? null : opts[i]); draw(); };
+    });
+  }
+  draw();
+}
+function missChips(el, get, set){
+  function draw(){
+    var cur = get();
+    el.innerHTML = MISSES.map(function(o){ return '<button class="chip' + (cur.indexOf(o) >= 0 ? ' on' : '') + '">' + esc(o) + '</button>'; }).join('');
+    Array.prototype.forEach.call(el.querySelectorAll('.chip'), function(b, i){
+      b.onclick = function(){
+        var o = MISSES[i], a = get().slice();
+        if (o === 'On target') a = a.indexOf(o) >= 0 ? [] : [o];
+        else {
+          var had = a.indexOf(o) >= 0;
+          a = a.filter(function(x){ return x !== 'On target' && x !== MISS_OPP[o] && x !== o; });
+          if (!had) a.push(o);
+        }
+        set(a); draw();
+      };
+    });
+  }
+  draw();
+}
+
+/* ---------- sheets ---------- */
+var sheetCancel = null;
+function openSheet(html, onCancel){
+  var w = $('#sheetWrap'), sh = $('#sheet');
+  sh.innerHTML = html; sh.scrollTop = 0; w.hidden = false; sheetCancel = onCancel || null;
+  return sh;
+}
+function closeSheet(silent){
+  var fn = sheetCancel; sheetCancel = null;
+  $('#sheetWrap').hidden = true; $('#sheet').innerHTML = '';
+  if (!silent && fn) fn();
+}
+$('#sheetWrap').addEventListener('click', function(e){ if (e.target.id === 'sheetWrap') closeSheet(); });
+
+/* ---------- hit shot ---------- */
+function goNext(){
+  var r = active(), h = curHole();
+  if (r.cur < r.holes.length - 1) r.cur++;
+  else { r.holes.push({n:nextN(h.n), shots:[], green:null}); r.cur = r.holes.length - 1; }
+  save(); renderHole(true);
+}
+function onHit(){
+  keepAwake();
+  var r = active();
+  if (!r){ r = newRound(''); renderHole(false); }
+  var h = curHole();
+  if (h.green){
+    if (!confirm('Hole ' + h.n + ' is finished. Start the next hole?')) return;
+    goNext(); h = curHole();
+  }
+  startCapture();
+  var lie = h.shots.length === 0 ? 'Tee' : null;
+  var el = openSheet(
+    '<h3>Hole ' + h.n + ' · Shot ' + (h.shots.length + 1) + '</h3>' +
+    '<div class="sub">Stand at your ball. Lie is optional.</div>' +
+    '<div class="chips" id="lieC"></div>' +
+    '<div class="clubs">' + S.settings.clubs.map(function(c, i){ return '<button data-i="' + i + '">' + esc(c) + '</button>'; }).join('') + '</div>' +
+    '<button class="btn ghost" id="cancel">Cancel</button>',
+    function(){ cap = null; });
+  chips(el.querySelector('#lieC'), LIES, function(){ return lie; }, function(v){ lie = v; });
+  el.querySelector('#cancel').onclick = function(){ closeSheet(); };
+  Array.prototype.forEach.call(el.querySelectorAll('.clubs button'), function(b){
+    b.onclick = function(){
+      var club = S.settings.clubs[+b.dataset.i];
+      closeSheet(true);
+      awaitCapture().then(function(pos){
+        if (!pos){ toast('No GPS fix yet. Wait for the GPS pill to show a value, then try again.', 4500); return; }
+        var prevIdx = h.shots.length - 1;
+        h.shots.push({id:uid(), club:club, lie:lie, lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), strike:null, miss:[], excluded:false});
+        save(); follow = true; renderHole(false);
+        if (prevIdx >= 0){
+          var p = h.shots[prevIdx];
+          toast('Shot ' + (prevIdx + 1) + ' (' + p.club + '): ' + r0(shotDistYd(h, prevIdx)) + ' yd', 3500);
+        } else toast('Tee shot logged: ' + club);
+      });
+    };
+  });
+}
+
+/* ---------- on green ---------- */
+function onGreen(){
+  keepAwake();
+  var h = curHole();
+  if (!h || !h.shots.length){ toast('Log at least one shot on this hole first.'); return; }
+  if (h.green){ toast('Hole ' + h.n + ' is already finished. Tap the flag to edit.'); return; }
+  startCapture();
+  var putts = null;
+  var el = openSheet(
+    '<h3>On the green · Hole ' + h.n + '</h3>' +
+    '<div class="sub">Stand at your ball, then enter the distance to the pin.</div>' +
+    '<label class="fl">Feet to pin<input id="ft" type="number" inputmode="decimal" min="0" step="0.5" placeholder="e.g. 18"></label>' +
+    '<label class="chk"><input type="checkbox" id="holed"> Holed out (0 ft)</label>' +
+    '<div class="fl">Putts (optional)</div><div class="chips" id="puttC"></div>' +
+    '<div class="row"><button class="btn ghost" id="cancel">Cancel</button><button class="btn pri" id="fin">Finish hole</button></div>',
+    function(){ cap = null; });
+  var ft = el.querySelector('#ft'), holed = el.querySelector('#holed');
+  chips(el.querySelector('#puttC'), ['0','1','2','3','4','5'], function(){ return putts; }, function(v){ putts = v; });
+  holed.onchange = function(){ ft.disabled = holed.checked; if (holed.checked) ft.value = '0'; };
+  el.querySelector('#cancel').onclick = function(){ closeSheet(); };
+  setTimeout(function(){ ft.focus(); }, 50);
+  el.querySelector('#fin').onclick = function(){
+    var v = ft.value.trim();
+    var feet = holed.checked ? 0 : (v === '' ? null : Number(v));
+    if (feet != null && (!isFinite(feet) || feet < 0)){ toast('Enter feet as a number, or leave it blank.'); return; }
+    var isHoled = holed.checked, p = putts;
+    closeSheet(true);
+    awaitCapture().then(function(pos){
+      if (!pos){ toast('No GPS fix, so the hole was not finished. Try again.', 4500); return; }
+      h.green = {lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), feet:feet, putts:p == null ? (isHoled ? 0 : null) : +p, holed:isHoled};
+      var i = h.shots.length - 1, d = shotDistYd(h, i);
+      save();
+      toast('Hole ' + h.n + ' done. Last shot (' + h.shots[i].club + '): ' + r0(d) + ' yd', 4000);
+      goNext();
+    });
+  };
+}
+
+/* ---------- edit ---------- */
+function enableMove(key, obj){
+  var m = markers[key]; if (!m) return;
+  follow = false; m.dragging.enable();
+  toast('Drag the marker to the right spot, then release.', 4000);
+  m.once('dragend', function(e){
+    var ll = e.target.getLatLng();
+    obj.lat = ll.lat; obj.lng = ll.lng; obj.moved = true;
+    save(); renderHole(false); toast('Position updated');
+  });
+}
+function openShotEdit(h, i){
+  var s = h.shots[i], d = shotDistYd(h, i);
+  var clubs = S.settings.clubs.slice(); if (clubs.indexOf(s.club) < 0) clubs.unshift(s.club);
+  var el = openSheet(
+    '<h3>Hole ' + h.n + ' · Shot ' + (i+1) + '</h3>' +
+    '<div class="sub">' + (d != null ? r0(d) + ' yd total (GPS, to ' + shotEnd(h,i).type + ')' : 'Distance pending: set by your next shot or ON GREEN') +
+      ' · GPS ±' + r0(yd(s.acc || 0)) + ' yd' + (s.moved ? ' · moved by hand' : '') + '</div>' +
+    '<label class="fl">Club<select id="club">' + clubs.map(function(c){ return '<option' + (c === s.club ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
+    '<div class="fl">Lie</div><div class="chips" id="lieC"></div>' +
+    '<div class="fl">Strike</div><div class="chips" id="stC"></div>' +
+    '<div class="fl">Miss</div><div class="chips" id="msC"></div>' +
+    '<label class="chk"><input type="checkbox" id="ex"' + (s.excluded ? ' checked' : '') + '> Exclude from club stats</label>' +
+    '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="del">Delete shot</button></div>' +
+    '<div class="stack"><button class="btn pri" id="done">Done</button></div>',
+    function(){ save(); renderHole(false); });
+  el.querySelector('#club').onchange = function(e){ s.club = e.target.value; save(); };
+  chips(el.querySelector('#lieC'), LIES, function(){ return s.lie || null; }, function(v){ s.lie = v; save(); });
+  chips(el.querySelector('#stC'), STRIKES, function(){ return s.strike || null; }, function(v){ s.strike = v; save(); });
+  missChips(el.querySelector('#msC'), function(){ return s.miss || []; }, function(v){ s.miss = v; save(); });
+  el.querySelector('#ex').onchange = function(e){ s.excluded = e.target.checked; save(); };
+  el.querySelector('#move').onclick = function(){ closeSheet(true); renderHole(false); enableMove(s.id, s); };
+  el.querySelector('#del').onclick = function(){
+    if (!confirm('Delete shot ' + (i+1) + ' (' + s.club + ')?')) return;
+    h.shots.splice(i, 1); save(); closeSheet(true); renderHole(false); toast('Shot deleted');
+  };
+  el.querySelector('#done').onclick = function(){ closeSheet(); };
+}
+function openGreenEdit(h){
+  var g = h.green, putts = g.putts == null ? null : String(g.putts);
+  var i = h.shots.length - 1, d = i >= 0 ? shotDistYd(h, i) : null;
+  var el = openSheet(
+    '<h3>Hole ' + h.n + ' · Green</h3>' +
+    '<div class="sub">' + (d != null ? 'Last shot (' + esc(h.shots[i].club) + '): ' + r0(d) + ' yd · ' : '') + 'GPS ±' + r0(yd(g.acc || 0)) + ' yd</div>' +
+    '<label class="fl">Feet to pin<input id="ft" type="number" inputmode="decimal" min="0" step="0.5" value="' + (g.feet == null ? '' : g.feet) + '"></label>' +
+    '<label class="chk"><input type="checkbox" id="holed"' + (g.holed ? ' checked' : '') + '> Holed out (0 ft)</label>' +
+    '<div class="fl">Putts (optional)</div><div class="chips" id="puttC"></div>' +
+    '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="reopen">Reopen hole</button></div>' +
+    '<div class="stack"><button class="btn pri" id="done">Done</button></div>',
+    function(){ commit(); });
+  var ft = el.querySelector('#ft'), holed = el.querySelector('#holed');
+  ft.disabled = !!g.holed;
+  chips(el.querySelector('#puttC'), ['0','1','2','3','4','5'], function(){ return putts; }, function(v){ putts = v; });
+  holed.onchange = function(){ ft.disabled = holed.checked; if (holed.checked) ft.value = '0'; };
+  function commit(){
+    var v = ft.value.trim(), f = holed.checked ? 0 : (v === '' ? null : Number(v));
+    if (f != null && (!isFinite(f) || f < 0)) f = g.feet;
+    g.feet = f; g.holed = holed.checked; g.putts = putts == null ? null : +putts;
+    save(); renderHole(false);
+  }
+  el.querySelector('#move').onclick = function(){ commit(); closeSheet(true); enableMove('green', g); };
+  el.querySelector('#reopen').onclick = function(){
+    if (!confirm('Reopen hole ' + h.n + '? This removes the green marker and feet to pin.')) return;
+    var r = active(); h.green = null; r.cur = r.holes.indexOf(h); save(); closeSheet(true); renderHole(true);
+  };
+  el.querySelector('#done').onclick = function(){ closeSheet(); };
+}
+
+/* ---------- stats ---------- */
+function computeStats(rounds, pureOnly){
+  var by = {};
+  rounds.forEach(function(r){ r.holes.forEach(function(h){ h.shots.forEach(function(s, i){
+    if (s.excluded) return;
+    if (pureOnly && s.strike !== 'Pure') return;
+    var d = shotDistYd(h, i); if (d == null) return;
+    (by[s.club] = by[s.club] || []).push(d);
+  }); }); });
+  var order = S.settings.clubs;
+  return Object.keys(by).map(function(club){
+    var a = by[club].slice().sort(function(x, y){ return x - y; }), n = a.length;
+    var mean = a.reduce(function(t, x){ return t + x; }, 0) / n;
+    var med = n % 2 ? a[(n-1)/2] : (a[n/2-1] + a[n/2]) / 2;
+    var sd = n > 1 ? Math.sqrt(a.reduce(function(t, x){ return t + (x - mean) * (x - mean); }, 0) / (n - 1)) : null;
+    return {club:club, n:n, mean:mean, median:med, min:a[0], max:a[n-1], sd:sd};
+  }).sort(function(x, y){
+    var ix = order.indexOf(x.club), iy = order.indexOf(y.club);
+    if (ix < 0) ix = 999; if (iy < 0) iy = 999;
+    return ix - iy || y.mean - x.mean;
+  });
+}
+window.__computeStats = computeStats;
+function openStats(){
+  var scope = active() ? 'round' : 'all', pure = false;
+  var el = openSheet(
+    '<h3>Club distances</h3>' +
+    '<div class="seg" id="scope"><button data-v="round">This round</button><button data-v="all">All rounds</button></div>' +
+    '<label class="chk"><input type="checkbox" id="pure"> Pure strikes only</label>' +
+    '<div id="tbl"></div>' +
+    '<div class="note">Yards are GPS total distance (carry plus roll), measured from each shot to your next shot or to your ball on the green. Excluded shots and shots without an end point are not counted. SD needs at least 2 shots.</div>' +
+    '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+  function draw(){
+    Array.prototype.forEach.call(el.querySelectorAll('#scope button'), function(b){ b.className = b.dataset.v === scope ? 'on' : ''; });
+    var rs = scope === 'round' ? (active() ? [active()] : []) : S.rounds;
+    var st = computeStats(rs, pure);
+    el.querySelector('#tbl').innerHTML = st.length ?
+      '<div class="tblwrap"><table class="stats"><thead><tr><th>Club</th><th>n</th><th>Avg</th><th>Med</th><th>Min</th><th>Max</th><th>SD</th></tr></thead><tbody>' +
+      st.map(function(x){ return '<tr><td>' + esc(x.club) + '</td><td>' + x.n + '</td><td>' + r0(x.mean) + '</td><td>' + r0(x.median) + '</td><td>' + r0(x.min) + '</td><td>' + r0(x.max) + '</td><td>' + (x.sd == null ? '—' : x.sd.toFixed(1)) + '</td></tr>'; }).join('') +
+      '</tbody></table></div>' : '<div class="note">No completed shots yet.</div>';
+  }
+  Array.prototype.forEach.call(el.querySelectorAll('#scope button'), function(b){ b.onclick = function(){ scope = b.dataset.v; draw(); }; });
+  el.querySelector('#pure').onchange = function(e){ pure = e.target.checked; draw(); };
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+  draw();
+}
+
+/* ---------- export / backup ---------- */
+function csvCell(v){ v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function toCSV(rounds){
+  var rows = [['date','course','hole','shot','club','lie','strike','miss','excluded','lat','lng','gps_acc_m','gps_fixes','moved_by_hand','distance_yd','measured_to','feet_to_pin','putts','holed']];
+  rounds.forEach(function(r){ r.holes.forEach(function(h){ h.shots.forEach(function(s, i){
+    var e = shotEnd(h, i), d = e ? yd(distM(s, e.pt)) : null, lastOnGreen = i === h.shots.length - 1 && h.green;
+    rows.push([isoDate(r.started), r.course, h.n, i+1, s.club, s.lie, s.strike, (s.miss || []).join('+'), s.excluded ? 1 : 0,
+      s.lat.toFixed(7), s.lng.toFixed(7), s.acc, s.n, s.moved ? 1 : 0, d == null ? '' : d.toFixed(1), e ? e.type : '',
+      lastOnGreen ? h.green.feet : '', lastOnGreen ? h.green.putts : '', lastOnGreen ? (h.green.holed ? 1 : 0) : '']);
+  }); }); });
+  return rows.map(function(row){ return row.map(csvCell).join(','); }).join('\n');
+}
+window.__toCSV = toCSV;
+function download(name, text, type){
+  var blob = new Blob([text], {type:type}), a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+
+/* ---------- rounds ---------- */
+function roundSummary(r){
+  var holes = r.holes.filter(function(h){ return h.shots.length; }).length;
+  var shots = r.holes.reduce(function(t, h){ return t + h.shots.length; }, 0);
+  return holes + ' hole' + (holes === 1 ? '' : 's') + ' · ' + shots + ' shot' + (shots === 1 ? '' : 's');
+}
+function openRounds(){
+  var el = openSheet('<h3>Rounds</h3><div class="rlist" id="rl"></div><div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+  function draw(){
+    var rl = el.querySelector('#rl');
+    if (!S.rounds.length){ rl.innerHTML = '<div class="note">No rounds yet.</div>'; return; }
+    rl.innerHTML = S.rounds.map(function(r, idx){
+      return '<div class="ritem"><div class="rt">' + esc(r.course || 'Untitled course') + (r.id === S.activeId ? '<span class="tag">CURRENT</span>' : '') + '</div>' +
+        '<div class="rs">' + niceDate(r.started) + ' · ' + roundSummary(r) + '</div>' +
+        '<div class="rb"><button data-a="open" data-i="' + idx + '">Open</button><button data-a="csv" data-i="' + idx + '">CSV</button><button data-a="del" data-i="' + idx + '">Delete</button></div></div>';
+    }).join('');
+    Array.prototype.forEach.call(rl.querySelectorAll('button'), function(b){
+      b.onclick = function(){
+        var r = S.rounds[+b.dataset.i];
+        if (b.dataset.a === 'open'){ S.activeId = r.id; r.cur = r.holes.length - 1; save(); closeSheet(true); renderHole(true); }
+        else if (b.dataset.a === 'csv'){ download('round-' + isoDate(r.started) + '.csv', toCSV([r]), 'text/csv'); }
+        else if (confirm('Delete this round permanently?')){
+          S.rounds.splice(+b.dataset.i, 1); if (S.activeId === r.id) S.activeId = null; save(); renderHole(false); draw();
+        }
+      };
+    });
+  }
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+  draw();
+}
+
+/* ---------- settings ---------- */
+function openSettings(){
+  var st = S.settings;
+  var el = openSheet(
+    '<h3>Settings</h3>' +
+    '<label class="fl">Clubs (one per line, in bag order)<textarea id="clubs" rows="9">' + esc(st.clubs.join('\n')) + '</textarea></label>' +
+    '<label class="fl">GPS averaging when you tap<select id="avg">' + [0,2,3,4,5,8].map(function(v){ return '<option value="' + v + '"' + (v === st.avgSeconds ? ' selected' : '') + '>' + (v ? v + ' seconds' : 'Off (use latest fix)') + '</option>'; }).join('') + '</select></label>' +
+    '<label class="fl">Map<select id="base"><option value="usgs"' + (st.basemap === 'usgs' ? ' selected' : '') + '>Satellite (USGS, can be saved offline)</option><option value="osm"' + (st.basemap === 'osm' ? ' selected' : '') + '>Street (OpenStreetMap, online only)</option><option value="sat"' + (st.basemap === 'sat' ? ' selected' : '') + '>Sharper satellite (Esri, needs key, online only)</option></select></label>' +
+    '<label class="fl">ArcGIS API key (for Esri satellite)<input id="key" type="password" autocomplete="off" value="' + esc(st.arcgisKey) + '" placeholder="Paste key"></label>' +
+    '<label class="chk"><input type="checkbox" id="wake"' + (st.wake ? ' checked' : '') + '> Keep screen awake during a round</label>' +
+    '<div class="note">The breadcrumb trail records only while this page is open on screen. Browsers pause GPS when the screen locks or you switch apps. Data is stored on this phone only: use Backup regularly.</div>' +
+    '<div class="row"><button class="btn ghost" id="cancel">Cancel</button><button class="btn pri" id="save">Save</button></div>');
+  el.querySelector('#cancel').onclick = function(){ closeSheet(); };
+  el.querySelector('#save').onclick = function(){
+    var clubs = el.querySelector('#clubs').value.split('\n').map(function(x){ return x.trim(); }).filter(Boolean);
+    st.clubs = clubs.length ? clubs : DEFAULT_CLUBS.slice();
+    st.avgSeconds = +el.querySelector('#avg').value;
+    st.arcgisKey = el.querySelector('#key').value.trim();
+    st.basemap = el.querySelector('#base').value;
+    if (st.basemap === 'sat' && !st.arcgisKey){ st.basemap = 'usgs'; toast('Esri satellite needs an ArcGIS key. Using USGS satellite.', 4000); }
+    st.wake = el.querySelector('#wake').checked;
+    save(); setBase(); closeSheet(true); keepAwake();
+  };
+}
+
+function openMenu(){
+  var r = active();
+  var el = openSheet(
+    '<h3>Shot Tracker</h3>' +
+    '<div class="sub">' + (r ? esc(r.course || 'Untitled course') + ' · ' + niceDate(r.started) + ' · ' + roundSummary(r) : 'No round in progress') + '</div>' +
+    '<div class="menu">' +
+    '<button id="mNew">New round</button>' +
+    '<button id="mCourse"' + (r ? '' : ' hidden') + '>Rename course</button>' +
+    '<button id="mRounds">Rounds</button>' +
+    '<button id="mStats">Club distances</button>' +
+    '<button id="mOffline">Offline maps</button>' +
+    '<button id="mCsv">Export all shots (CSV)</button>' +
+    '<button id="mBackup">Backup data (JSON)</button>' +
+    '<button id="mRestore">Restore from backup</button>' +
+    '<button id="mSettings">Settings</button>' +
+    '</div><input type="file" id="restoreFile" accept="application/json,.json" hidden>' +
+    '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+  el.querySelector('#mNew').onclick = function(){
+    var name = prompt('Course name (optional)', '');
+    if (name === null) return;
+    newRound(name.trim()); closeSheet(true); renderHole(true); keepAwake();
+  };
+  el.querySelector('#mCourse').onclick = function(){
+    var name = prompt('Course name', r.course || ''); if (name === null) return;
+    r.course = name.trim(); save(); closeSheet(true);
+  };
+  el.querySelector('#mRounds').onclick = function(){ closeSheet(true); openRounds(); };
+  el.querySelector('#mStats').onclick = function(){ closeSheet(true); openStats(); };
+  el.querySelector('#mOffline').onclick = function(){ closeSheet(true); openOffline(); };
+  el.querySelector('#mSettings').onclick = function(){ closeSheet(true); openSettings(); };
+  el.querySelector('#mCsv').onclick = function(){ download('shots-' + isoDate(Date.now()) + '.csv', toCSV(S.rounds), 'text/csv'); };
+  el.querySelector('#mBackup').onclick = function(){ download('shot-tracker-backup-' + isoDate(Date.now()) + '.json', JSON.stringify(S), 'application/json'); };
+  var rf = el.querySelector('#restoreFile');
+  el.querySelector('#mRestore').onclick = function(){ rf.click(); };
+  rf.onchange = function(){
+    var f = rf.files[0]; if (!f) return;
+    f.text().then(function(t){
+      var j = JSON.parse(t);
+      if (!j || j.v !== 1 || !Array.isArray(j.rounds)) throw new Error('bad');
+      if (!confirm('Replace all data on this phone with the backup (' + j.rounds.length + ' rounds)?')) return;
+      j.settings = Object.assign(defaults().settings, j.settings || {}); j.offlineAreas = j.offlineAreas || [];
+      S = j; save(); setBase(); closeSheet(true); renderHole(true); toast('Backup restored');
+    }).catch(function(){ toast('That file is not a Shot Tracker backup.'); });
+  };
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+
+/* ---------- offline maps ---------- */
+/* Standard Web Mercator tile math (same scheme the USGS service uses). */
+function lng2x(lng, z){ return Math.floor((lng + 180) / 360 * Math.pow(2, z)); }
+function lat2y(lat, z){ var r = lat * Math.PI / 180; return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z)); }
+function tilesFor(b, zmin, zmax){
+  var out = [];
+  for (var z = zmin; z <= zmax; z++){
+    var x0 = lng2x(b.w, z), x1 = lng2x(b.e, z), y0 = lat2y(b.n, z), y1 = lat2y(b.s, z);
+    for (var x = x0; x <= x1; x++) for (var y = y0; y <= y1; y++) out.push(USGS_TILE + z + '/' + y + '/' + x);
+  }
+  return out;
+}
+window.__tilesFor = tilesFor;
+function mb(bytes){ return (bytes / 1048576).toFixed(1) + ' MB'; }
+var offlineOK = ('caches' in window) && ('serviceWorker' in navigator) && window.isSecureContext;
+var dl = null; // active download {cancel}
+
+function registerSW(){
+  if (!offlineOK) return;
+  navigator.serviceWorker.register('sw.js').catch(function(){ offlineOK = false; });
+}
+
+function downloadArea(name, b, onProgress){
+  var urls = tilesFor(b, OFFLINE_ZMIN, OFFLINE_ZMAX), i = 0, done = 0, ok = 0, bytes = 0, netErr = 0, httpErr = 0;
+  dl = {cancel:false};
+  var mine = dl;
+  return caches.open(TILE_CACHE).then(function(cache){
+    function worker(){
+      if (mine.cancel || i >= urls.length) return Promise.resolve();
+      var u = urls[i++];
+      return cache.match(u).then(function(hit){
+        if (hit) return hit;
+        return fetch(u, {mode:'cors'}).then(function(res){
+          if (!res.ok){ httpErr++; return null; }
+          return cache.put(u, res.clone()).then(function(){ return res; });
+        });
+      }).then(function(res){
+        if (!res) return;
+        return res.blob().then(function(bl){ ok++; bytes += bl.size; });
+      }).catch(function(){ netErr++; })
+        .then(function(){ done++; onProgress(done, urls.length, bytes); return worker(); });
+    }
+    var ws = []; for (var k = 0; k < 6; k++) ws.push(worker());
+    return Promise.all(ws);
+  }).then(function(){
+    if (dl === mine) dl = null;
+    return {cancelled:mine.cancel, total:urls.length, ok:ok, bytes:bytes, netErr:netErr, httpErr:httpErr};
+  });
+}
+
+function deleteAreaTiles(area){
+  var keep = {};
+  S.offlineAreas.forEach(function(a){ if (a.id !== area.id) tilesFor(a.b, a.zmin, a.zmax).forEach(function(u){ keep[u] = 1; }); });
+  return caches.open(TILE_CACHE).then(function(c){
+    return Promise.all(tilesFor(area.b, area.zmin, area.zmax).filter(function(u){ return !keep[u]; }).map(function(u){ return c.delete(u); }));
+  });
+}
+
+function openOffline(){
+  if (!offlineOK){
+    openSheet('<h3>Offline maps</h3><div class="note">Offline maps need this page opened over https:// in a browser that supports service workers.</div><div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+    $('#close').onclick = function(){ closeSheet(); }; return;
+  }
+  var el = openSheet(
+    '<h3>Offline maps</h3>' +
+    '<div class="sub">Saves USGS satellite imagery for the area on your screen, so the map works with no signal. GPS and shot tracking do not need a data signal.</div>' +
+    '<div id="areas"></div>' +
+    '<div id="prog" class="note" hidden></div>' +
+    '<div class="stack"><button class="btn pri" id="saveArea">Save area on screen</button><button class="btn danger" id="cancelDl" hidden>Stop download</button></div>' +
+    '<div class="note" id="usage"></div>' +
+    '<div class="note">How: zoom and pan the map so the whole course fills the screen, then tap Save. Saves zoom levels ' + OFFLINE_ZMIN + ' to ' + OFFLINE_ZMAX + '. The app itself is also stored on the phone after the first visit, so it opens with no signal.</div>' +
+    '<div class="stack"><button class="btn ghost" id="clearAll">Delete all saved imagery</button><button class="btn ghost" id="close">Close</button></div>');
+  function usage(){
+    if (navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function(e){
+      var u = el.querySelector('#usage'); if (u) u.textContent = 'This app is using ' + mb(e.usage || 0) + ' of phone storage' + (e.quota ? ' (browser allows up to ' + mb(e.quota) + ').' : '.');
+    });
+  }
+  function drawAreas(){
+    var box = el.querySelector('#areas');
+    if (!S.offlineAreas.length){ box.innerHTML = '<div class="note">No saved areas yet.</div>'; return; }
+    box.innerHTML = '<div class="rlist">' + S.offlineAreas.map(function(a, idx){
+      return '<div class="ritem"><div class="rt">' + esc(a.name) + '</div><div class="rs">' + niceDate(a.t) + ' · ' + a.ok + ' of ' + a.total + ' tiles · ' + mb(a.bytes) + '</div>' +
+        '<div class="rb"><button data-a="view" data-i="' + idx + '">Show</button><button data-a="del" data-i="' + idx + '">Delete</button></div></div>';
+    }).join('') + '</div>';
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function(bt){
+      bt.onclick = function(){
+        var a = S.offlineAreas[+bt.dataset.i];
+        if (bt.dataset.a === 'view'){ follow = false; closeSheet(true); map.fitBounds([[a.b.s, a.b.w], [a.b.n, a.b.e]]); if (S.settings.basemap !== 'usgs'){ S.settings.basemap = 'usgs'; save(); setBase(); } return; }
+        if (!confirm('Delete saved imagery for ' + a.name + '?')) return;
+        deleteAreaTiles(a).then(function(){ S.offlineAreas = S.offlineAreas.filter(function(x){ return x.id !== a.id; }); save(); drawAreas(); usage(); });
+      };
+    });
+  }
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+  el.querySelector('#clearAll').onclick = function(){
+    if (!confirm('Delete all saved map imagery from this phone? Rounds are not affected.')) return;
+    caches.delete(TILE_CACHE).then(function(){ S.offlineAreas = []; save(); drawAreas(); usage(); toast('Saved imagery deleted'); });
+  };
+  el.querySelector('#cancelDl').onclick = function(){ if (dl) dl.cancel = true; };
+  el.querySelector('#saveArea').onclick = function(){
+    if (dl){ toast('A download is already running.'); return; }
+    if (!navigator.onLine){ toast('You need a data or Wi-Fi connection to save an area.'); return; }
+    var bb = map.getBounds(), b = {n:bb.getNorth(), s:bb.getSouth(), e:bb.getEast(), w:bb.getWest()};
+    var n = tilesFor(b, OFFLINE_ZMIN, OFFLINE_ZMAX).length;
+    if (n > OFFLINE_MAX_TILES){ toast('That area needs ' + n + ' tiles (limit ' + OFFLINE_MAX_TILES + '). Zoom in so just the course fills the screen.', 5000); return; }
+    var r = active();
+    var name = prompt('Name this area (' + n + ' tiles)', (r && r.course) || 'Course');
+    if (name === null) return;
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function(){});
+    var prog = el.querySelector('#prog'), sv = el.querySelector('#saveArea'), cn = el.querySelector('#cancelDl');
+    prog.hidden = false; sv.hidden = true; cn.hidden = false;
+    downloadArea(name.trim() || 'Course', b, function(d, t, by){ prog.textContent = 'Downloading ' + d + ' of ' + t + ' tiles · ' + mb(by); }).then(function(res){
+      prog.hidden = true; sv.hidden = false; cn.hidden = true;
+      if (res.ok === 0){
+        toast(res.netErr ? 'Download failed: no connection, or the imagery server refused the request.' : 'No imagery available for this area.', 5000);
+        return;
+      }
+      S.offlineAreas.unshift({id:uid(), name:name.trim() || 'Course', b:b, zmin:OFFLINE_ZMIN, zmax:OFFLINE_ZMAX, total:res.total, ok:res.ok, bytes:res.bytes, t:Date.now()});
+      save(); drawAreas(); usage();
+      var miss = res.total - res.ok;
+      toast((res.cancelled ? 'Stopped. ' : 'Saved. ') + res.ok + ' tiles, ' + mb(res.bytes) + (miss ? ' (' + miss + ' not saved)' : ''), 4500);
+      if (S.settings.basemap !== 'usgs'){ S.settings.basemap = 'usgs'; save(); setBase(); }
+    });
+  };
+  drawAreas(); usage();
+}
+
+/* ---------- wiring ---------- */
+$('#hitBtn').onclick = onHit;
+$('#greenBtn').onclick = onGreen;
+$('#menuBtn').onclick = openMenu;
+$('#prevHole').onclick = function(){ var r = active(); if (r && r.cur > 0){ r.cur--; save(); renderHole(true); } };
+$('#nextHole').onclick = function(){
+  var r = active(); if (!r) return;
+  var h = curHole();
+  if (r.cur < r.holes.length - 1) r.cur++;
+  else if (h.shots.length) { r.holes.push({n:nextN(h.n), shots:[], green:null}); r.cur = r.holes.length - 1; }
+  else { toast('Log a shot on this hole first.'); return; }
+  save(); renderHole(true);
+};
+$('#holeLabel').onclick = function(){
+  var h = curHole(); if (!h) return;
+  var v = prompt('Hole number', h.n); if (v === null) return;
+  var n = parseInt(v, 10); if (n >= 1 && n <= 36){ h.n = n; save(); renderHole(false); } else toast('Enter a hole number from 1 to 36.');
+};
+$('#centerBtn').onclick = function(){ follow = true; if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); else toast('Waiting for GPS'); };
+$('#layerBtn').onclick = function(){
+  var st = S.settings, order = st.arcgisKey ? ['usgs','osm','sat'] : ['usgs','osm'];
+  var i = order.indexOf(st.basemap);
+  st.basemap = order[(i + 1) % order.length];
+  save(); setBase();
+  toast({usgs:'USGS satellite (works offline in saved areas)', osm:'Street map (online only)', sat:'Esri satellite (online only)'}[st.basemap]);
+};
+
+layout();
+renderHole(true);
+startGPS();
+registerSW();
+keepAwake();
+})();
+</script>
+</body>
+</html>
