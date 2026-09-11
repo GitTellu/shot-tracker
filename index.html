@@ -40,8 +40,19 @@ button{font:inherit;color:inherit;cursor:pointer}
 .chip{flex:none;padding:8px 12px;border-radius:999px;border:1.5px solid #b9b9b9;background:#fff;font-size:14px;font-weight:700}
 .chip.on{background:var(--g);border-color:var(--g);color:#fff}
 .clab{flex:none;align-self:center;font-size:12px;color:var(--mut);width:46px;font-weight:700;text-transform:uppercase}
-.actions{display:grid;grid-template-columns:0.9fr 1fr 1.4fr;gap:8px;margin-top:10px}
-.actions .btn{font-size:16px;padding:0 4px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.actions .btn{font-size:16px;padding:0 4px;height:50px}
+#hitHint{margin-top:8px;font-size:13px;font-weight:700;color:var(--mut)}
+#hitHint.ok{color:#0a7a33}
+.clubrow{padding:6px 0 2px;display:grid;grid-template-rows:repeat(2,auto);grid-auto-flow:column;grid-auto-columns:max-content;gap:6px}
+.clubrow .chip{padding:10px 12px;font-size:15px;font-weight:800;border-width:2px;background:#f6f7f6}
+.clubrow .chip:active{background:var(--g2);color:#fff;border-color:var(--g2)}
+.clubrow .chip.sug{border-color:#ff9800;background:#fff3e0}
+.pill.lock{color:#fff;background:#0a7a33}
+.cchip{padding:3px 10px;font-size:15px;border-color:var(--g2);color:var(--g)}
+#lcClubs .chip{padding:10px 13px}
+#undoBar{position:fixed;left:0;right:0;margin:0 auto;width:max-content;top:calc(env(safe-area-inset-top) + 64px);z-index:4001;background:#111;color:#fff;border-radius:12px;padding:8px 8px 8px 14px;font-weight:700;font-size:15px;display:flex;align-items:center;gap:12px;max-width:calc(100% - 32px);box-shadow:0 4px 14px rgba(0,0,0,.35)}
+#undoBtn{border:0;background:#ff9800;color:#111;font-weight:900;border-radius:9px;padding:10px 14px;font-size:15px;flex:none}
 .plan{background:#fff3e0;color:#8a4b00;border:2px solid #ff9800}
 .plan.on{background:#ff9800;color:#111}
 #planBox{margin-top:6px}
@@ -114,7 +125,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .capBox .big{font-size:52px;font-weight:900}
 .capBox .stack{margin-top:14px}
 .pill.stale{color:#777}
-#toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top) + 64px);z-index:4000;background:#111;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700;font-size:15px;max-width:calc(100% - 32px);box-shadow:0 4px 14px rgba(0,0,0,.35);text-align:center}
+#toast{position:fixed;left:0;right:0;margin:0 auto;width:max-content;top:calc(env(safe-area-inset-top) + 64px);z-index:4000;background:#111;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700;font-size:15px;max-width:calc(100% - 32px);box-shadow:0 4px 14px rgba(0,0,0,.35);text-align:center}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
 .flag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid #d32f2f;color:#d32f2f;font-weight:900;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
@@ -143,7 +154,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 
 <section id="panel">
   <div id="liveNum">&mdash;</div>
-  <div id="liveSub">Tap HIT SHOT at your ball to start.</div>
+  <div id="liveSub">Stand at your ball and tap the club you hit.</div>
   <div id="planBox" hidden>
     <div class="planHead"><div><div id="planNum" class="pnum">— yd</div><div id="planSub" class="psub"></div></div><button id="planClose" class="link">Close plan</button></div>
     <div class="chips" id="planClubs"></div>
@@ -151,13 +162,15 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
   </div>
   <div id="lastCard" hidden>
     <div class="lcHead"><span id="lcTitle"></span><button id="lcEdit" class="link">Edit</button></div>
+    <div class="chips" id="lcClubs" hidden></div>
     <div class="chips"><span class="clab">Strike</span><span id="lcStrike" style="display:contents"></span></div>
     <div class="chips"><span class="clab">Miss</span><span id="lcMiss" style="display:contents"></span></div>
   </div>
+  <div id="hitHint"></div>
+  <div class="chips clubrow" id="clubRow"></div>
   <div class="actions">
     <button id="planBtn" class="btn plan">PLAN</button>
     <button id="greenBtn" class="btn sec">ON GREEN</button>
-    <button id="hitBtn" class="btn pri">HIT SHOT</button>
   </div>
 </section>
 
@@ -179,6 +192,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 </div>
 
 <div id="toast" hidden></div>
+<div id="undoBar" hidden><span id="undoTxt"></span><button id="undoBtn">Undo</button></div>
 
 <script>
 (function(){
@@ -247,13 +261,14 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.0.0', SCHEMA = 2;
-function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:true}, rounds:[], activeId:null, playingId:null, offlineAreas:[]}; }
+var APP_VERSION = '1.1.0', SCHEMA = 3;
+function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[]}; }
 function normalize(j){
   var d = defaults();
   if (!j || j.v !== 1) return d;
   j.settings = Object.assign(d.settings, j.settings || {}); j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || [];
   if (!('playingId' in j)) j.playingId = null;
+  if ((j.schema || 1) < 3) j.settings.wake = false; // v1.1: the phone can sleep between shots by default
   j.schema = SCHEMA;
   return j;
 }
@@ -444,7 +459,10 @@ function gpsPill(){
   var el = $('#gps');
   if (!fix){ return; }
   var age = Date.now() - fix.t;
-  if (age > STALE_FIX_MS){ el.className = 'pill stale'; el.textContent = 'GPS ' + Math.round(age / 1000) + ' s old'; return; }
+  if (age > STALE_FIX_MS){ el.className = 'pill stale'; el.textContent = 'GPS ' + Math.round(age / 1000) + ' s old'; renderHint(); return; }
+  var ls = lockState();
+  renderHint(ls);
+  if (ls.locked){ el.className = 'pill lock'; el.textContent = 'Locked ±' + r0(yd(ls.pos.acc)) + ' yd'; return; }
   var a = fix.acc;
   el.className = 'pill ' + (a <= 5 ? 'good' : a <= 10 ? 'fair' : 'poor');
   el.textContent = 'GPS ±' + r0(yd(a)) + ' yd';
@@ -456,6 +474,7 @@ function onPos(p, requested){
   // A capture accepts: the answer to the fresh-fix request made at the tap (maximumAge 0), or routine
   // updates received after the tap whose position time is no more than 2 s before it.
   if (cap && now >= cap.start && (requested === true || pt >= cap.start - 2000)) cap.samples.push(fix);
+  fix.speed = c.speed; feedStill(fix);
 
   var ll = [fix.lat, fix.lng];
   youDot.setLatLng(ll); accCircle.setLatLng(ll).setRadius(fix.acc);
@@ -554,6 +573,57 @@ function awaitCapture(){
 function gpsQ(pos){ var q = {lagMs:pos.lag || 0}; if (pos.stale){ q.stale = true; q.ageS = pos.ageS; } if (pos.weak) q.weak = true; return q; }
 function gpsNote(pos){ return pos.stale ? ' (old GPS fix, ' + pos.ageS + ' s)' : pos.weak ? ' (weak GPS)' : ''; }
 
+/* ---------- auto-lock: averaging while you stand at your ball ----------
+   Fresh fixes are collected while you stay within a small radius of where you stopped. After 3 s and
+   3 fixes the position is "locked": tapping a club then logs instantly using that average. Any movement
+   beyond the radius (or a reported speed above walking-stop pace) starts the window again. */
+var still = [];
+var LOCK_MIN_MS = 3000, LOCK_MIN_FIXES = 3, LOCK_KEEP_MS = 30000, LOCK_MAX_GAP_MS = 2500;
+function stillRadius(acc){ return Math.min(8, Math.max(3, 0.75 * acc)); }
+function feedStill(f){
+  if (document.visibilityState === 'hidden' || f.lag > 2000) return;
+  if (still.length && (distM(still[0], f) > stillRadius(f.acc) || (f.speed != null && f.speed > 1.2))) still = [];
+  still.push(f);
+  while (still.length > 1 && f.t - still[0].t > LOCK_KEEP_MS) still.shift();
+}
+function lockState(){
+  if (!still.length) return {locked:false};
+  var last = still[still.length - 1];
+  if (Date.now() - last.t > LOCK_MAX_GAP_MS) return {locked:false};
+  var span = last.t - still[0].t;
+  if (span < LOCK_MIN_MS || still.length < LOCK_MIN_FIXES) return {locked:false, pending:true};
+  var pos = combine(still);
+  if (!pos || pos.acc > WEAK_ACC_M) return {locked:false, weak:true};
+  return {locked:true, pos:pos, spanS:Math.round(span / 1000)};
+}
+window.__lockState = lockState;
+document.addEventListener('visibilitychange', function(){ still = []; });
+
+function renderHint(ls){
+  var el = $('#hitHint'); if (!el) return;
+  ls = ls || lockState();
+  var h = curHole(), txt, ok = false;
+  if (!fix) txt = 'Waiting for GPS…';
+  else if (Date.now() - fix.t > STALE_FIX_MS) txt = 'Getting a fresh GPS position…';
+  else if (ls.locked){ txt = 'Locked at your ball · tap the club you hit'; ok = true; }
+  else txt = 'Stand still a moment to lock your position, or tap a club now';
+  if (h && h.green) txt = 'Hole ' + h.n + ' finished · tap a club to start the next hole';
+  el.textContent = txt; el.className = ok ? 'ok' : '';
+}
+function renderClubRow(){
+  var row = $('#clubRow'); if (!row) return;
+  var clubs = S.settings.clubs, hl = plan ? plan.club : null;
+  row.innerHTML = clubs.map(function(c, i){ return '<button class="chip' + (c === hl ? ' sug' : '') + '" data-i="' + i + '">' + esc(c) + '</button>'; }).join('');
+  Array.prototype.forEach.call(row.querySelectorAll('.chip'), function(b){ b.onclick = function(){ onClub(clubs[+b.dataset.i]); }; });
+  var on = row.querySelector('.chip.sug'), h = curHole();
+  if (on && on.scrollIntoView) on.scrollIntoView({inline:'center', block:'nearest'});
+  else if (!h || !h.shots.length || h.green) row.scrollLeft = 0; // tee shot: start at the driver end of the bag
+  else { // after the tee shot, start at the irons (woods are one swipe back)
+    var firstIron = null; Array.prototype.some.call(row.querySelectorAll('.chip'), function(b){ if (!WOODS.test(b.textContent)){ firstIron = b; return true; } return false; });
+    if (firstIron) row.scrollLeft = Math.max(0, firstIron.getBoundingClientRect().left - row.getBoundingClientRect().left + row.scrollLeft - 4);
+  }
+}
+
 /* ---------- wake lock ---------- */
 var wakeLock = null;
 function keepAwake(){
@@ -615,14 +685,14 @@ function renderHole(fit){
       else if (fix){ follow = true; map.setView([fix.lat, fix.lng], 18); }
     }
   }
-  renderLastCard(); updateLive(); drawPlan();
+  renderLastCard(); updateLive(); drawPlan(); renderClubRow(); renderHint();
 }
 
 function updateLive(){
   var h = curHole(), num = $('#liveNum'), sub = $('#liveSub');
   var last = h && h.shots.length ? h.shots[h.shots.length - 1] : null;
-  if (!active()){ num.textContent = '—'; sub.textContent = 'Tap HIT SHOT at your ball to start a round.'; liveLine.setLatLngs([]); return; }
-  if (!last){ num.textContent = '—'; sub.textContent = 'Hole ' + h.n + ': at the tee, tap HIT SHOT and pick a club.'; liveLine.setLatLngs([]); return; }
+  if (!active()){ num.textContent = '—'; sub.textContent = 'At your ball, tap the club you hit to start a round.'; liveLine.setLatLngs([]); return; }
+  if (!last){ num.textContent = '—'; sub.textContent = 'Hole ' + h.n + ': on the tee, tap the club you hit.'; liveLine.setLatLngs([]); return; }
   if (h.green){
     liveLine.setLatLngs([]);
     num.textContent = (h.green.feet == null ? '—' : h.green.feet) + ' ft';
@@ -642,8 +712,16 @@ function renderLastCard(){
   if (!h || !h.shots.length || plan){ card.hidden = true; return; }
   var i = h.shots.length - 1, s = h.shots[i], d = shotDistYd(h, i);
   card.hidden = false;
-  $('#lcTitle').textContent = 'Shot ' + (i+1) + ' · ' + s.club + (s.lie ? ' · from ' + s.lie : '') + (d != null ? ' · ' + r0(d) + ' yd' : '');
+  $('#lcTitle').innerHTML = 'Shot ' + (i+1) + ' · <button class="chip cchip" id="lcClub">' + esc(s.club) + ' &#9662;</button>' + (s.lie ? ' · from ' + esc(s.lie) : '') + (d != null ? ' · ' + r0(d) + ' yd' : '');
   $('#lcEdit').onclick = function(){ openShotEdit(h, i); };
+  var box = $('#lcClubs'); box.hidden = true;
+  $('#lcClub').onclick = function(){
+    if (!box.hidden){ box.hidden = true; return; }
+    box.innerHTML = S.settings.clubs.map(function(c, k){ return '<button class="chip' + (c === s.club ? ' on' : '') + '" data-i="' + k + '">' + esc(c) + '</button>'; }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.chip'), function(b){ b.onclick = function(){ s.club = S.settings.clubs[+b.dataset.i]; save(); renderHole(false); toast('Shot ' + (i+1) + ' changed to ' + s.club); }; });
+    box.hidden = false;
+    var on = box.querySelector('.chip.on'); if (on && on.scrollIntoView) on.scrollIntoView({inline:'center', block:'nearest'});
+  };
   chips($('#lcStrike'), STRIKES, function(){ return s.strike || null; }, function(v){ s.strike = v; save(); });
   missChips($('#lcMiss'), function(){ return s.miss || []; }, function(v){ s.miss = v; save(); });
 }
@@ -699,16 +777,42 @@ function goNext(){
   else { r.holes.push({n:nextN(h.n), shots:[], green:null}); r.cur = r.holes.length - 1; }
   save(); renderHole(true);
 }
-function onHit(){
+var undoTimer = null, lastLog = null;
+function showUndo(text){
+  $('#toast').hidden = true;
+  $('#undoTxt').textContent = text; $('#undoBar').hidden = false;
+  clearTimeout(undoTimer); undoTimer = setTimeout(function(){ $('#undoBar').hidden = true; lastLog = null; }, 5000);
+}
+function undoLast(){
+  var u = lastLog; if (!u) return;
+  lastLog = null; clearTimeout(undoTimer); $('#undoBar').hidden = true;
+  var r = null; S.rounds.forEach(function(x){ if (x.id === u.rid) r = x; });
+  if (!r) return;
+  r.holes.forEach(function(h){ h.shots = h.shots.filter(function(s){ return s.id !== u.shotId; }); });
+  if (u.newRound && !r.holes.some(function(h){ return h.shots.length; })){
+    S.rounds = S.rounds.filter(function(x){ return x.id !== r.id; }); store.del('trail:' + r.id);
+    S.activeId = u.prevActive; S.playingId = u.prevPlaying;
+  } else {
+    while (r.holes.length > u.holesLen && !r.holes[r.holes.length - 1].shots.length) r.holes.pop();
+    r.cur = Math.min(u.cur, r.holes.length - 1);
+  }
+  if (u.plan){ plan = u.plan; planKey = holeKey(); $('#planBtn').classList.add('on'); $('#liveNum').hidden = true; $('#liveSub').hidden = true; renderPlanBox(); }
+  save(); renderHole(false); toast('Shot removed');
+}
+
+/* One tap per shot: tapping a club logs the shot at your current (locked) position. */
+function onClub(club){
   if (!booted) return;
   keepAwake();
+  var snap = {prevActive:S.activeId, prevPlaying:S.playingId, newRound:false, plan:plan};
   var r = active();
   if (r && !r.keepOpen && Date.now() - r.started > 12 * 3600 * 1000){
     if (confirm('The current round started ' + niceDate(r.started) + '. Start a new round for this shot?\n\nOK = new round, Cancel = keep adding to the old one.')){
-      r = newRound(''); if (plan) planKey = holeKey(); renderHole(false); // a plan made at this ball carries into the new round
+      r = newRound(''); snap.newRound = true; if (plan) planKey = holeKey(); renderHole(false); // a plan made at this ball carries over
     } else { r.keepOpen = true; save(); }
   }
-  if (!r){ r = newRound(''); if (plan) planKey = holeKey(); renderHole(false); }
+  if (!r){ r = newRound(''); snap.newRound = true; if (plan) planKey = holeKey(); renderHole(false); }
+  snap.rid = r.id; snap.holesLen = r.holes.length; snap.cur = r.cur;
   var h = curHole();
   if (h.green){
     var lastIdx = r.holes.length - 1, tgt = r.holes[lastIdx];
@@ -718,40 +822,28 @@ function onHit(){
     if (tgt.green){ r.holes.push({n:nextN(tgt.n), shots:[], green:null}); r.cur = r.holes.length - 1; }
     save(); if (keepPlan) planKey = holeKey(); renderHole(true); h = curHole();
   }
-  startCapture();
+  var usePlan = plan ? {lat:plan.aim.lat, lng:plan.aim.lng, club:plan.club, shape:plan.pat.shape, L:plan.pat.L, R:plan.pat.R, S:plan.pat.S, G:plan.pat.G} : null;
   var lie = h.shots.length === 0 ? 'Tee' : null;
-  var planned = plan ? plan.club : null;
-  var el = openSheet(
-    '<h3>Hole ' + h.n + ' · Shot ' + (h.shots.length + 1) + '</h3>' +
-    '<div class="sub">Stand at your ball. Lie is optional.</div>' +
-    '<div class="chips" id="lieC"></div>' +
-    (planned ? '<div class="stack"><button class="btn pri" id="hitPlanned">Hit planned ' + esc(planned) + '</button></div><div class="sub" style="margin-top:8px">or pick a different club (the plan is still kept):</div>' : '') +
-    '<div class="clubs">' + S.settings.clubs.map(function(c, i){ return '<button data-i="' + i + '">' + esc(c) + '</button>'; }).join('') + '</div>' +
-    '<button class="btn ghost" id="cancel">Cancel</button>',
-    function(){ cap = null; });
-  chips(el.querySelector('#lieC'), LIES, function(){ return lie; }, function(v){ lie = v; });
-  el.querySelector('#cancel').onclick = function(){ closeSheet(); };
-  function pick(club){
-      closeSheet(true);
-      var usePlan = plan ? {lat:plan.aim.lat, lng:plan.aim.lng, club:plan.club, shape:plan.pat.shape, L:plan.pat.L, R:plan.pat.R, S:plan.pat.S, G:plan.pat.G} : null;
-      awaitCapture().then(function(pos){
-        if (!pos){ toast('Shot not recorded.'); return; }
-        var prevIdx = h.shots.length - 1;
-        var shot = Object.assign({id:uid(), club:club, lie:lie, lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), strike:null, miss:[], excluded:false}, gpsQ(pos));
-        markPlaying(r);
-        if (usePlan) shot.plan = usePlan;
-        h.shots.push(shot);
-        if (usePlan) endPlan(true);
-        save(); follow = true; renderHole(false);
-        if (prevIdx >= 0){
-          var p = h.shots[prevIdx], pr = planResultFor(h, prevIdx);
-          toast('Shot ' + (prevIdx + 1) + ' (' + p.club + '): ' + r0(shotDistYd(h, prevIdx)) + ' yd' + (pr ? ' · ' + missText(pr) + ' of aim' + (pr.inside ? ' · inside pattern' : ' · outside pattern') : '') + gpsNote(pos), 4500);
-        } else toast('Tee shot logged: ' + club + (usePlan ? ' (aim saved)' : '') + gpsNote(pos));
-      });
-  }
-  if (planned) el.querySelector('#hitPlanned').onclick = function(){ pick(planned); };
-  Array.prototype.forEach.call(el.querySelectorAll('.clubs button'), function(b){
-    b.onclick = function(){ pick(S.settings.clubs[+b.dataset.i]); };
+  var ls = lockState(), got;
+  if (ls.locked){ cap = null; got = Promise.resolve(Object.assign({}, ls.pos, {stale:false, ageS:0, weak:false, locked:true})); }
+  else { startCapture(); got = awaitCapture(); }
+  got.then(function(pos){
+    if (!pos){ toast('Shot not recorded.'); return; }
+    var prevIdx = h.shots.length - 1;
+    var shot = Object.assign({id:uid(), club:club, lie:lie, lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), strike:null, miss:[], excluded:false}, gpsQ(pos));
+    if (pos.locked) shot.lockS = ls.spanS;
+    markPlaying(r);
+    if (usePlan) shot.plan = usePlan;
+    h.shots.push(shot);
+    if (usePlan) endPlan(true);
+    save(); follow = true; renderHole(false);
+    snap.shotId = shot.id; lastLog = snap;
+    var msg = 'Logged ' + club;
+    if (prevIdx >= 0){
+      var p = h.shots[prevIdx], pr = planResultFor(h, prevIdx);
+      msg += ' · last shot ' + r0(shotDistYd(h, prevIdx)) + ' yd' + (pr ? ', ' + missText(pr) : '');
+    } else if (usePlan) msg += ' · aim saved';
+    showUndo(msg + gpsNote(pos));
   });
 }
 
@@ -765,7 +857,7 @@ function onGreen(){
   var putts = null;
   var el = openSheet(
     '<h3>On the green · Hole ' + h.n + '</h3>' +
-    '<div class="sub">Stand at your ball, then enter the distance to the pin.</div>' +
+    '<div class="sub">Stand at your ball on the green, then enter the distance to the pin.</div>' +
     '<label class="fl">Feet to pin<input id="ft" type="number" inputmode="decimal" min="0" step="0.5" placeholder="e.g. 18"></label>' +
     '<label class="chk"><input type="checkbox" id="holed"> Holed out (0 ft)</label>' +
     '<div class="fl">Putts (optional)</div><div class="chips" id="puttC"></div>' +
@@ -782,7 +874,9 @@ function onGreen(){
     if (feet != null && (!isFinite(feet) || feet < 0)){ toast('Enter feet as a number, or leave it blank.'); return; }
     var isHoled = holed.checked, p = putts;
     closeSheet(true);
-    awaitCapture().then(function(pos){
+    var gls = lockState();
+    var got = gls.locked ? (cap = null, Promise.resolve(Object.assign({}, gls.pos, {stale:false, ageS:0, weak:false}))) : awaitCapture();
+    got.then(function(pos){
       if (!pos){ toast('Hole not finished.'); return; }
       h.green = Object.assign({lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), feet:feet, putts:p == null ? (isHoled ? 0 : null) : +p, holed:isHoled}, gpsQ(pos));
       markPlaying(active());
@@ -974,14 +1068,14 @@ function startPlan(){
   plan.pat = patYards(patternFor(plan.club));
   follow = false; planKey = holeKey();
   $('#planBtn').classList.add('on'); $('#liveNum').hidden = true; $('#liveSub').hidden = true;
-  renderLastCard(); renderPlanBox(); drawPlan();
+  renderLastCard(); renderPlanBox(); drawPlan(); renderClubRow();
   toast('Drag the target, or tap the map, to set your aim.', 3500);
 }
 function holeKey(){ var r = active(); return (S.activeId || '') + ':' + (r ? r.cur : ''); }
 function endPlan(silent){
   plan = null; aimDragging = false; planKey = null; planLayer.clearLayers(); aimMarker = null;
   $('#planBtn').classList.remove('on'); $('#planBox').hidden = true; $('#liveNum').hidden = false; $('#liveSub').hidden = false;
-  renderLastCard();
+  renderLastCard(); renderClubRow();
   if (!silent) updateLive();
 }
 function setAim(ll){ if (!plan) return; plan.aim = {lat:ll.lat, lng:ll.lng}; drawPlan(); renderPlanInfo(); }
@@ -1025,7 +1119,7 @@ function renderPlanBox(){
   var clubs = S.settings.clubs;
   $('#planClubs').innerHTML = clubs.map(function(c, i){ return '<button class="chip' + (c === plan.club ? ' on' : '') + '" data-i="' + i + '">' + esc(c) + '</button>'; }).join('');
   Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){
-    b.onclick = function(){ plan.club = clubs[+b.dataset.i]; plan.pat = patYards(patternFor(plan.club)); renderPlanBox(); drawPlan(); };
+    b.onclick = function(){ plan.club = clubs[+b.dataset.i]; plan.pat = patYards(patternFor(plan.club)); renderPlanBox(); drawPlan(); renderClubRow(); };
   });
   var on = $('#planClubs').querySelector('.chip.on'); if (on && on.scrollIntoView) on.scrollIntoView({inline:'center', block:'nearest'});
   renderPlanInfo();
@@ -1190,7 +1284,7 @@ function openSettings(){
   var el = openSheet(
     '<h3>Settings</h3>' +
     '<label class="fl">Clubs (one per line, in bag order)<textarea id="clubs" rows="9">' + esc(st.clubs.join('\n')) + '</textarea></label>' +
-    '<label class="fl">GPS averaging when you tap<select id="avg">' + [0,2,3,4,5,8].map(function(v){ return '<option value="' + v + '"' + (v === st.avgSeconds ? ' selected' : '') + '>' + (v ? v + ' seconds' : 'Off (use latest fix)') + '</option>'; }).join('') + '</select></label>' +
+    '<label class="fl">If you tap before your position locks, average for<select id="avg">' + [0,2,3,4,5,8].map(function(v){ return '<option value="' + v + '"' + (v === st.avgSeconds ? ' selected' : '') + '>' + (v ? v + ' seconds' : 'Off (use latest fix)') + '</option>'; }).join('') + '</select></label>' +
     '<label class="fl">Map<select id="base">' +
       '<option value="mapbox"' + (st.basemap === 'mapbox' ? ' selected' : '') + '>Sharp satellite (Mapbox, needs token, save offline 30 days)</option>' +
       '<option value="sat"' + (st.basemap === 'sat' ? ' selected' : '') + '>Sharp satellite (Esri, free key, online only)</option>' +
@@ -1201,8 +1295,8 @@ function openSettings(){
     '<div class="note">Stored only on this phone, never in the website code. In your Mapbox account, restrict the token to https://gittellu.github.io</div>' +
     '<label class="fl">ArcGIS API key (for Esri satellite)<input id="key" type="password" autocomplete="off" value="' + esc(st.arcgisKey) + '" placeholder="Paste key"></label>' +
     '<div class="fl">Dispersion patterns</div><div class="chips" id="patClubs"></div>' +
-    '<label class="chk"><input type="checkbox" id="wake"' + (st.wake ? ' checked' : '') + '> Keep screen awake during a round</label>' +
-    '<div class="note">The breadcrumb trail records only while this page is open on screen. Browsers pause GPS when the screen locks or you switch apps. Data is stored on this phone only: use Backup regularly.</div>' +
+    '<label class="chk"><input type="checkbox" id="wake"' + (st.wake ? ' checked' : '') + '> Keep screen awake during a round (off lets the phone sleep between shots)</label>' +
+    '<div class="note">Shot distances do not need the app on screen between shots. The live yardage and breadcrumb trail only update while it is on screen. Data is stored on this phone only: use Backup regularly.</div>' +
     '<div class="row"><button class="btn ghost" id="cancel">Cancel</button><button class="btn pri" id="save">Save</button></div>');
   el.querySelector('#patClubs').innerHTML = st.clubs.map(function(c, i){ return '<button class="chip" data-i="' + i + '">' + esc(c) + '</button>'; }).join('');
   Array.prototype.forEach.call(el.querySelectorAll('#patClubs .chip'), function(b){ b.onclick = function(){ openPatternEdit(st.clubs[+b.dataset.i]); }; });
@@ -1463,6 +1557,7 @@ function openGuide(){
     '<div class="hero"><h2>Shot Tracker</h2><p>Know your real yardages. Pick a smarter target. See exactly how close you came.</p></div>' +
 
     '<div class="sell">' +
+      '<div class="card"><b>One tap per shot</b>Stand at your ball, tap the club you hit. The app has already averaged your position while you set up, so there is nothing to wait for.</div>' +
       '<div class="card"><b>Your real numbers, not your best ones</b>Every shot is measured by GPS from where you hit it to where you hit the next one. Over a few rounds you get honest averages, medians and spread for every club in your bag.</div>' +
       '<div class="card"><b>Plan every shot</b>Drop a target on the map and see your dispersion drawn to scale: an arc off the tee, an oval into greens. Set each club\'s pattern to match your shot shape, like 15 yards left and 45 right for a fade.</div>' +
       '<div class="card"><b>The truth after the shot</b>When you reach your ball, the app tells you how far left or right, long or short you finished from your target, and whether it stayed inside your pattern. Your aim results build up club by club.</div>' +
@@ -1481,11 +1576,11 @@ function openGuide(){
 
     '<h4>Playing a hole</h4>' +
     '<ol>' +
-      '<li><b>Wait for good GPS.</b> The pill at the top right shows accuracy. Green is good, amber is fair, red means give it a few seconds.</li>' +
-      '<li><b>Plan (optional).</b> Tap ' + k('PLAN', 'plan') + '. Drag the orange target, or tap the map where you want to aim. The big number is your yards to the target. Pick the club; the pattern redraws. Use ' + k('−') + ' ' + k('+') + ' to narrow or widen it, or ' + k('Pattern') + ' to change the split.</li>' +
-      '<li><b>Hit.</b> Standing at your ball, tap ' + k('HIT SHOT', 'hit') + ', then the club (or <i>Hit planned</i>). Hold still for about 4 seconds while the app averages fresh GPS readings. If the phone has not delivered a fresh position yet, the app waits and tells you, rather than quietly using an old one.</li>' +
-      '<li><b>Walk.</b> The big number counts the yards from your last shot as you walk. Tag the strike and miss on the card if you want. It\'s optional.</li>' +
-      '<li><b>Next shot.</b> At your ball, tap ' + k('HIT SHOT', 'hit') + ' again. Your last shot gets its distance, and its result against the target if you planned it.</li>' +
+      '<li><b>Stand at your ball.</b> While you pick a club and set up, the app averages fresh GPS readings. After a few seconds the pill at the top right turns solid green and says <b>Locked</b>.</li>' +
+      '<li><b>Plan (optional).</b> Tap ' + k('PLAN', 'plan') + '. Drag the orange target, or tap the map where you want to aim. The big number is your yards to the target. Pick the club and the pattern redraws. Use ' + k('−') + ' ' + k('+') + ' to narrow or widen it, or ' + k('Pattern') + ' to change the split.</li>' +
+      '<li><b>Tap the club you hit.</b> Use the club row above ' + k('PLAN', 'plan') + ' and ' + k('ON GREEN') + '. Do it before or after your swing, as long as you have not walked away from the spot. It logs instantly, and <b>Undo</b> shows for 5 seconds. If you tap before the position is locked, the app takes a few seconds to average first.</li>' +
+      '<li><b>Walk.</b> Lock the screen and pocket the phone if you like. Shot distances do not need the app open; only the live yardage and breadcrumb trail do. At your next ball, take the phone out and give it a few seconds to lock again.</li>' +
+      '<li><b>Next shot.</b> Tapping a club at your next ball gives your last shot its distance, and its result against the target if you planned it. Hit a different club than you tapped? Tap the club name on the shot card to change it.</li>' +
       '<li><b>On the green.</b> Stand at your ball, tap ' + k('ON GREEN') + ', type the feet to the pin, and add putts if you like. <i>Finish hole</i> moves you to the next hole.</li>' +
     '</ol>' +
 
@@ -1504,7 +1599,7 @@ function openGuide(){
       '<li><b>GPS is good, not perfect.</b> Phones are typically accurate to about 5 meters (16 feet) in open sky, so any single distance can be a few yards off. The ± the app shows is the phone\'s own estimate, and real errors can be larger. Averages over many shots are where the value is. You can drag a marker to correct a bad one.</li>' +
       '<li><b>Distances are total, not carry.</b> They measure where the ball stopped, roll included.</li>' +
       '<li><b>Aim results use where the ball finished,</b> since that is where you hit your next shot from.</li>' +
-      '<li><b>Keep the app on screen.</b> Phones pause GPS for web apps when the screen locks, so the breadcrumb trail has gaps then. Shots are captured when you tap, so they are not affected.</li>' +
+      '<li><b>The screen can sleep between shots.</b> Phones pause GPS for web apps when the screen is off, so the breadcrumb trail has gaps then. Shots are captured at your ball when you tap, so they are not affected.</li>' +
       '<li><b>Your data lives on this phone only.</b> Use <i>Backup</i> now and then. It is a plain JSON file you own, and <i>Export</i> gives every shot as a spreadsheet.</li>' +
     '</ul></div>' +
 
@@ -1514,7 +1609,7 @@ function openGuide(){
 }
 
 /* ---------- wiring ---------- */
-$('#hitBtn').onclick = onHit;
+$('#undoBtn').onclick = undoLast;
 $('#planBtn').onclick = function(){ if (plan) endPlan(); else startPlan(); };
 $('#planClose').onclick = function(){ endPlan(); };
 $('#pwMinus').onclick = function(){ nudgeWidth(-5); };
