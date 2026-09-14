@@ -144,6 +144,19 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
 .flag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid #d32f2f;color:#d32f2f;font-weight:900;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.stp{display:flex;align-items:center;gap:8px;padding:5px 0}
+.stp .lbl{flex:1;font-size:14px;font-weight:700}
+.stp button{width:38px;height:38px;border-radius:10px;border:2px solid var(--ln);background:#fff;font-size:19px;font-weight:900;line-height:1}
+.stp b{min-width:26px;text-align:center;font-size:17px;font-weight:900}
+.stp.on .lbl{color:var(--g2)}
+.putt{border:1px solid var(--ln);border-radius:12px;padding:8px 10px;margin:6px 0;background:#fafbfa}
+.putt .ph{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+.putt .ph b{font-size:14px;flex:none}
+.putt .ph input{width:76px;padding:8px;border:2px solid var(--ln);border-radius:10px;font-size:15px;font-weight:700}
+.putt .ph .rm{margin-left:auto}
+.putt .chips{margin:2px 0}
+.putt .chip{padding:6px 9px;font-size:13px}
+.scoreline{font-size:13px;color:var(--mut);font-weight:600;margin-top:2px}
 .gflag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid var(--g2);color:var(--g2);font-weight:900;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .gflag.set{background:var(--g2);color:#fff}
 #tgtBar{position:fixed;left:8px;right:8px;z-index:2400;background:#111;color:#fff;border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 14px rgba(0,0,0,.4)}
@@ -177,7 +190,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 <div id="tgtBar" hidden><div class="t" id="tgtText"></div><button id="tgtCancel">Cancel</button><button id="tgtSave">Save</button></div>
 
 <section id="panel">
-  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green &#9971;</button><button id="greenBtn" class="link" hidden>On the green &#9873;</button></div>
+  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green &#9971;</button><button id="greenBtn" class="link" hidden>Finish hole &#9873;</button></div>
   <div id="planBox" hidden>
     <div class="planHead">
       <div id="planNum" class="pnum">— yd</div>
@@ -219,7 +232,8 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
   <div class="rcHead"><div><div id="rcMain">—</div><div id="rcSub" class="psub"></div></div><button id="rcUndo" class="link">Undo</button></div>
   <div id="rcAsk" hidden><div class="clab" style="width:auto;margin-bottom:4px">What did you hit?</div><div class="chips" id="rcClubs"></div></div>
   <div id="rcTags" hidden><div class="chips"><span class="clab">Strike</span><span id="rcStrike" style="display:contents"></span></div><div class="chips"><span class="clab">Miss</span><span id="rcMiss" style="display:contents"></span></div></div>
-  <div class="row"><button id="rcGreen" class="btn sec">On the green</button><button id="rcPlan" class="btn plan">Plan next</button></div>
+  <button id="rcSep" class="btn ghost" style="margin-bottom:8px" hidden>No, that was a separate shot</button>
+  <div class="row"><button id="rcGreen" class="btn sec">Finish hole</button><button id="rcPlan" class="btn plan">Plan next</button></div>
   <button id="rcDone" class="btn ghost" style="margin-top:8px">Done</button>
 </div>
 
@@ -290,7 +304,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.5.0', SCHEMA = 4;
+var APP_VERSION = '1.6.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -637,18 +651,18 @@ function renderStatus(){
   var gps = !fix ? 'waiting for GPS' : (Date.now() - fix.t > STALE_FIX_MS ? 'GPS ' + Math.round((Date.now() - fix.t) / 1000) + ' s old' : (ls.locked ? 'locked ±' + r0(yd(ls.pos.acc)) + ' yd' : 'getting a fresh fix'));
   var toG = (h && fix) ? toGreenYd({lat:fix.lat, lng:fix.lng}, h) : null;
   var gTxt = toG == null ? '' : ' · ' + r0(toG) + ' yd to green';
-  $('#tgtBtn').hidden = !(h && !greenFor(h) && !placing);
-  $('#greenBtn').hidden = true;
+  var unfinished = !!(h && h.shots.length && !h.green);
+  $('#greenBtn').hidden = !unfinished;
+  $('#tgtBtn').hidden = !(h && !greenFor(h) && !placing) || unfinished;
   if (!active() || !h){ main.textContent = 'Ready to play'; sub.textContent = 'PLAN your tee shot, or RECORD to mark your ball · ' + gps; return; }
-  $('#greenBtn').hidden = true;
-  if (h.green){ main.textContent = 'Hole ' + h.n + ' finished'; sub.textContent = (h.shots.length) + ' shots · tap RECORD or PLAN to start the next hole · ' + gps; return; }
-  $('#greenBtn').hidden = true;
+  if (h.green){
+    main.textContent = 'Hole ' + h.n + ' · ' + holeScore(h) + ' strokes';
+    sub.textContent = h.shots.length + ' shots · ' + puttCount(h) + ' putts' + (penTotal(cardOf(h)) ? ' · ' + penTotal(cardOf(h)) + ' penalty' : '') + ' · tap the flag to edit · ' + gps; return;
+  }
   if (!open){
     main.textContent = toG == null ? 'Hole ' + h.n + ' · no ball marked' : r0(toG) + ' yd to the green';
     sub.textContent = (toG == null ? '' : 'Hole ' + h.n + ' · no ball marked · ') + 'PLAN your shot, or RECORD to mark your ball · ' + gps; return;
   }
-  $('#greenBtn').hidden = false;
-  $('#tgtBtn').hidden = true; // one action at a time in the bar: finishing the hole wins
   var d = fix ? r0(yd(distM(open, fix))) : null;
   main.textContent = (d == null ? '—' : d + ' yd') + ' from your ball';
   sub.textContent = 'Shot ' + h.shots.length + (open.club ? ' · ' + open.club : ' · club not set') + (open.plan ? ' · aimed ' + r0(yd(distM(open, open.plan))) + ' yd' : '') + gTxt + ' · ' + gps;
@@ -884,6 +898,16 @@ function courseFor(create){
   if (c && r.courseId !== c.id) r.courseId = c.id;
   return c;
 }
+function parFor(h){
+  if (!h) return null;
+  var c = courseFor(false);
+  return (c && c.pars && c.pars[h.n]) || null;
+}
+function setPar(h, v){
+  var c = courseFor(true); if (!c) return;
+  c.pars = c.pars || {};
+  if (v) c.pars[h.n] = v; else delete c.pars[h.n];
+}
 function greenFor(h){
   if (!h) return null;
   var c = courseFor(false);
@@ -983,6 +1007,53 @@ function maybeAutoFit(){
 window.__fitHole = fitHole;
 window.__mapView = function(){ var c = map.getCenter(); return {zoom:map.getZoom(), lat:c.lat, lng:c.lng}; }; // exposed for testing
 
+/* ---------- the hole card: the whole story of a hole ----------
+   Shots are measured by GPS; everything a phone cannot see - putts, bunkers, penalty strokes -
+   is entered once when the hole is finished. Score is worked out from all three, and can be
+   overridden, because a round where a shot went unrecorded should still show the score you made. */
+var PEN_KINDS = [['water','Penalty area / water'], ['ob','Out of bounds'], ['lost','Lost ball'], ['unpl','Unplayable']];
+var BUNK_KINDS = [['fw','Fairway bunker'], ['gs','Greenside bunker']];
+var PUTT_READ = ['L','Straight','R'], PUTT_OUT = ['In','Left','Right','Short','Long'];
+function scoreName(d){
+  if (d === 0) return 'par';
+  if (d === -1) return 'birdie';
+  if (d === -2) return 'eagle';
+  if (d === -3) return 'albatross';
+  if (d === 1) return 'bogey';
+  if (d === 2) return 'double bogey';
+  if (d === 3) return 'triple bogey';
+  return d > 0 ? d + ' over' : (-d) + ' under';
+}
+function blankCard(){ return {putts:[], pen:{water:0,ob:0,lost:0,unpl:0}, bunker:{fw:0,gs:0}, score:null, note:''}; }
+function cardOf(h){ return (h && h.card) || null; }
+function penTotal(c){ return c ? PEN_KINDS.reduce(function(t, k){ return t + (c.pen[k[0]] || 0); }, 0) : 0; }
+function bunkerTotal(c){ return c ? BUNK_KINDS.reduce(function(t, k){ return t + (c.bunker[k[0]] || 0); }, 0) : 0; }
+function puttCount(h){
+  var c = cardOf(h);
+  if (c && c.putts.length) return c.putts.length;
+  return (h && h.green && h.green.putts != null) ? h.green.putts : 0;
+}
+function countedShots(h){ return h ? h.shots.filter(function(s){ return !s.excluded; }).length : 0; }
+function autoScore(h){ return countedShots(h) + puttCount(h) + penTotal(cardOf(h)); }
+function holeScore(h){
+  var c = cardOf(h);
+  if (c && c.score != null) return c.score;
+  return (h && (h.green || h.shots.length)) ? autoScore(h) : null;
+}
+function roundScore(r){
+  var t = 0, played = 0, par = 0, parred = 0;
+  (r ? r.holes : []).forEach(function(h){
+    var v = holeScore(h);
+    if (v != null && (h.green || h.shots.length)){
+      t += v; played++;
+      var pp = parFor(h); if (pp){ par += pp; parred++; }
+    }
+  });
+  return {strokes:t, holes:played, par:par, parHoles:parred, toPar:(parred === played && played) ? t - par : null};
+}
+function roundPutts(r){ return (r ? r.holes : []).reduce(function(t, h){ return t + puttCount(h); }, 0); }
+window.__holeScore = holeScore; window.__roundScore = roundScore;
+
 /* ---------- rendering ---------- */
 function layout(){
   var ph = $('#panel').offsetHeight;
@@ -1032,7 +1103,7 @@ function renderHole(fit){
     });
     if (h.green){
       var gm = L.marker([h.green.lat, h.green.lng], {icon:flagIcon, zIndexOffset:1100}).addTo(holeLayer);
-      gm.bindTooltip('<span class="urot">' + (h.green.feet == null ? '?' : h.green.feet) + ' ft</span>', {permanent:true, direction:'right', offset:[14,0], className:'dtip'});
+      gm.bindTooltip('<span class="urot">' + holeScore(h) + (h.green.feet == null ? '' : ' · ' + h.green.feet + ' ft') + '</span>', {permanent:true, direction:'right', offset:[14,0], className:'dtip'});
       gm.on('click', function(){ openGreenEdit(h); });
       markers.green = gm;
     }
@@ -1113,6 +1184,13 @@ function closeSheet(silent){
 $('#sheetWrap').addEventListener('click', function(e){ if (e.target.id === 'sheetWrap') closeSheet(); });
 
 /* ---------- hit shot ---------- */
+/* Walking to the next tee is the moment the putts and the score are lost for good, so ask here. */
+function nagUnfinished(){
+  var h = curHole();
+  if (!h || !h.shots.length || h.green) return false;
+  if (!confirm('Hole ' + h.n + ' has ' + h.shots.length + ' shot' + (h.shots.length === 1 ? '' : 's') + ' logged but was never finished, so it has no putts and no score.\n\nOK = finish it now, Cancel = move on without them.')) return false;
+  onGreen(); return true;
+}
 function goNext(){
   var r = active(), h = curHole();
   if (r.cur < r.holes.length - 1) r.cur++;
@@ -1128,6 +1206,11 @@ function undoLast(){
   var r = null; S.rounds.forEach(function(x){ if (x.id === u.rid) r = x; });
   if (!r) return;
   r.holes.forEach(function(h){ h.shots = h.shots.filter(function(s){ return s.id !== u.shotId; }); });
+  if (u.remarked){ // a re-mark moved an existing shot instead of adding one: put it back
+    r.holes.forEach(function(h){ h.shots.forEach(function(x){
+      if (x.id === u.remarked.id){ x.lat = u.remarked.was.lat; x.lng = u.remarked.was.lng; x.club = u.remarked.was.club; }
+    }); });
+  }
   if (u.greenOf){ r.holes.forEach(function(h){ if (h.n === u.greenOf) h.green = null; }); }
   if (u.closedId && u.club !== undefined){ // put the closed shot's club back the way it was
     r.holes.forEach(function(h){ h.shots.forEach(function(x){ if (x.id === u.closedId) x.club = u.club; }); });
@@ -1171,8 +1254,11 @@ function grabPosition(){
   startCapture(); return awaitCapture();
 }
 
+/* A second mark at the same ball, this soon and this close, is a re-mark, not a new shot. */
+var REMARK_MS = 120000, REMARK_YD = 6;
 /* Drops your ball position. plan and club are optional (PLAN then Go supplies both). */
 function markBall(opts){
+  opts = opts || {};
   if (!booted) return Promise.resolve(null);
   keepAwake(); hideResult();
   var snap = {prevActive:S.activeId, prevPlaying:S.playingId, newRound:false, plan:plan};
@@ -1182,6 +1268,24 @@ function markBall(opts){
   var usePlan = (opts && opts.plan) || null;
   return grabPosition().then(function(pos){
     if (!pos) return null;
+    /* Tapping RECORD twice at the same ball used to make a second shot a yard from the first,
+       which then measured as a 0 yd shot and pushed every club distance onto the wrong stroke.
+       A second mark at the same spot within two minutes is the same ball: update it, do not add. */
+    var last = h.shots[h.shots.length - 1];
+    if (last && !opts.forceNew && Date.now() - last.t < REMARK_MS && yd(distM(last, pos)) < REMARK_YD){
+      var was = {lat:last.lat, lng:last.lng, club:last.club};
+      last.lat = pos.lat; last.lng = pos.lng; last.acc = pos.acc; last.n = pos.n; last.t = Date.now();
+      Object.assign(last, gpsQ(pos));
+      if (pos.locked) last.lockS = pos.lockS;
+      if (opts && opts.club) last.club = opts.club;
+      if (usePlan) last.plan = usePlan;
+      markPlaying(r);
+      if (usePlan) endPlan(true);
+      save(); follow = true; renderHole(false);
+      snap.shotId = null; snap.remarked = {id:last.id, was:was};
+      lastLog = snap;
+      return {h:h, shot:last, closed:null, pos:pos, remarked:true, opts:opts};
+    }
     var closed = openShot(h);
     var shot = Object.assign({id:uid(), club:(opts && opts.club) || null, lie:h.shots.length === 0 ? 'Tee' : null,
       lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), strike:null, miss:[], excluded:false}, gpsQ(pos));
@@ -1202,6 +1306,7 @@ function onRecord(){
   markBall({}).then(function(res){
     if (!res) return;
     var h = res.h, closed = res.closed;
+    if (res.remarked){ showResult({main:'Ball re-marked', sub:'Same spot as your last mark, so it was moved rather than counted as another shot' + gpsNote(res.pos), h:h, shot:res.shot, ask:!res.shot.club, separate:res.opts}); return; }
     if (!closed){ showResult({main:'Ball marked', sub:'Tap RECORD again at your next ball' + gpsNote(res.pos), h:h}); return; }
     var i = h.shots.indexOf(closed), d = shotDistYd(h, i), pr = planResultFor(h, i);
     showResult({
@@ -1218,6 +1323,7 @@ function onPlanGo(){
   markBall({plan:p, club:club}).then(function(res){
     if (!res) return;
     var h = res.h, closed = res.closed, i;
+    if (res.remarked){ showResult({main:'Ball re-marked', sub:'Same spot as your last mark, so it was moved rather than counted as another shot', h:h, shot:res.shot, ask:!res.shot.club, separate:res.opts}); return; }
     if (closed){
       i = h.shots.indexOf(closed);
       showResult({main:(closed.club ? closed.club + ' · ' : '') + r0(shotDistYd(h, i)) + ' yd', sub:'Your previous shot, now measured', h:h, shot:closed, ask:!closed.club});
@@ -1229,6 +1335,7 @@ function onMarkOnly(){
   markBall({}).then(function(res){
     if (!res) return;
     var h = res.h, closed = res.closed;
+    if (res.remarked){ showResult({main:'Ball re-marked', sub:'Same spot as your last mark, so it was moved rather than counted as another shot', h:h, shot:res.shot, ask:!res.shot.club, separate:res.opts}); return; }
     if (closed){ var i = h.shots.indexOf(closed); showResult({main:(closed.club ? closed.club + ' · ' : '') + r0(shotDistYd(h, i)) + ' yd', sub:'Your previous shot, now measured', h:h, shot:closed, ask:!closed.club}); }
     else toast('Ball marked' + gpsNote(res.pos), 3000);
   });
@@ -1256,129 +1363,175 @@ function showResult(o){
     chips($('#rcStrike'), STRIKES, function(){ return o.shot.strike || null; }, function(v){ o.shot.strike = v; save(); });
     missChips($('#rcMiss'), function(){ return o.shot.miss || []; }, function(v){ o.shot.miss = v; save(); });
   }
-  $('#rcGreen').hidden = !o.h || !!o.h.green || !openShot(o.h);
+  var sep = $('#rcSep');
+  sep.hidden = !o.separate;
+  if (o.separate) sep.onclick = function(){
+    sep.hidden = true;
+    markBall(Object.assign({}, o.separate, {forceNew:true})).then(function(res){
+      if (!res) return;
+      var c = res.closed, i;
+      if (c){ i = res.h.shots.indexOf(c); showResult({main:(c.club ? c.club + ' · ' : '') + r0(shotDistYd(res.h, i)) + ' yd', sub:'Kept as a separate shot', h:res.h, shot:c, ask:!c.club}); }
+      else toast('Kept as a separate shot');
+    });
+  };
+  $('#rcGreen').hidden = !o.h || !!o.h.green || !o.h.shots.length;
   card.hidden = false;
   layout();
 }
 
-/* ---------- on green ---------- */
+/* ---------- finishing a hole: the whole story ---------- */
 function onGreen(){
   keepAwake();
   var h = curHole();
   if (!h || !h.shots.length){ toast('Log at least one shot on this hole first.'); return; }
-  if (h.green){ toast('Hole ' + h.n + ' is already finished. Tap the flag to edit.'); return; }
+  if (h.green){ openCard(h, 'edit'); return; }
   startCapture();
-  var putts = null;
+  openCard(h, 'finish');
+}
+function openGreenEdit(h){ openCard(h, 'edit'); }
+
+/* One sheet, used to finish a hole and to edit it afterwards. Only the distance is asked for;
+   putts, bunkers and penalty strokes are there for anyone who wants the full picture. */
+function openCard(h, mode){
+  var finish = mode === 'finish';
+  var g = h.green || null;
+  var c = h.card ? JSON.parse(JSON.stringify(h.card)) : blankCard();
+  var scoreTouched = c.score != null;
+  var lastI = h.shots.length - 1, lastD = lastI >= 0 ? shotDistYd(h, lastI) : null;
+
   var el = openSheet(
-    '<h3>On the green · Hole ' + h.n + '</h3>' +
-    '<div class="sub">Stand at your ball on the green, then enter the distance to the pin.</div>' +
-    '<label class="fl">Feet to pin<input id="ft" type="number" inputmode="decimal" min="0" step="0.5" placeholder="e.g. 18"></label>' +
-    '<label class="chk"><input type="checkbox" id="holed"> Holed out (0 ft)</label>' +
-    '<div class="fl">Putts (optional)</div><div class="chips" id="puttC"></div>' +
-    '<div class="row"><button class="btn ghost" id="cancel">Cancel</button><button class="btn pri" id="fin">Finish hole</button></div>',
+    '<h3>' + (finish ? 'Finish hole ' : 'Hole ') + h.n + '</h3>' +
+    '<div class="sub">' + (finish
+      ? 'Stand at your ball on the green. Only the distance is needed \u2014 the rest is there when you want the whole story.'
+      : ((lastD != null ? 'Last shot ' + r0(lastD) + ' yd \u00b7 ' : '') + 'GPS \u00b1' + r0(yd((g && g.acc) || 0)) + ' yd')) + '</div>' +
+    '<label class="fl">Feet to pin<input id="ft" type="number" inputmode="decimal" min="0" step="0.5" placeholder="e.g. 18" value="' + (g && g.feet != null ? g.feet : '') + '"></label>' +
+    '<label class="chk"><input type="checkbox" id="holed"' + (g && g.holed ? ' checked' : '') + '> Holed out from off the green</label>' +
+    '<div class="fl">Par</div><div class="chips" id="parC"></div>' +
+    '<div class="fl">Putts</div><div class="chips" id="puttN"></div><div id="puttList"></div>' +
+    '<div class="fl">Bunkers and penalty strokes</div><div id="trouble"></div>' +
+    '<div class="fl">Score</div><div id="scoreStep"></div><div class="scoreline" id="scoreWhy"></div>' +
+    '<label class="fl">Note<input id="cnote" type="text" maxlength="120" placeholder="anything worth remembering" value="' + esc(c.note || '') + '"></label>' +
+    (finish ? '' : '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="reopen">Reopen hole</button></div>') +
+    '<div class="row"><button class="btn ghost" id="cancel">Cancel</button><button class="btn pri" id="fin">' + (finish ? 'Finish hole' : 'Save') + '</button></div>',
     function(){ cap = null; });
+
   var ft = el.querySelector('#ft'), holed = el.querySelector('#holed');
-  chips(el.querySelector('#puttC'), ['0','1','2','3','4','5'], function(){ return putts; }, function(v){ putts = v; });
-  holed.onchange = function(){ ft.disabled = holed.checked; if (holed.checked) ft.value = '0'; };
+  ft.disabled = holed.checked;
+  holed.onchange = function(){ ft.disabled = holed.checked; if (holed.checked) ft.value = '0'; drawScore(); };
+
+  function firstFt(){ var v = ft.value.trim(); return v === '' ? null : Number(v); }
+  function setCount(n){
+    while (c.putts.length > n) c.putts.pop();
+    while (c.putts.length < n) c.putts.push({ft:(c.putts.length === 0 ? firstFt() : null), read:null, act:null, out:null});
+    drawPutts(); drawScore();
+  }
+  function drawCount(){
+    chips(el.querySelector('#puttN'), ['0','1','2','3','4','5'],
+      function(){ return String(c.putts.length); },
+      function(v){ setCount(v == null ? 0 : +v); });
+  }
+  function drawPutts(){
+    var box = el.querySelector('#puttList');
+    box.innerHTML = c.putts.map(function(pt, i){
+      return '<div class="putt"><div class="ph"><b>Putt ' + (i + 1) + '</b>' +
+        '<input class="pft" type="number" inputmode="decimal" min="0" step="0.5" placeholder="ft" value="' + (pt.ft == null ? '' : pt.ft) + '">' +
+        '<span class="clab">ft</span><button class="link rm">Remove</button></div>' +
+        '<div class="chips"><span class="clab">Read</span><span class="rd" style="display:contents"></span></div>' +
+        '<div class="chips"><span class="clab">Broke</span><span class="ac" style="display:contents"></span></div>' +
+        '<div class="chips"><span class="clab">Result</span><span class="ot" style="display:contents"></span></div></div>';
+    }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.putt'), function(node, i){
+      var pt = c.putts[i];
+      node.querySelector('.pft').oninput = function(){ var v = this.value.trim(); pt.ft = v === '' ? null : Number(v); };
+      node.querySelector('.rm').onclick = function(){ c.putts.splice(i, 1); drawPutts(); drawCount(); drawScore(); };
+      chips(node.querySelector('.rd'), PUTT_READ, function(){ return pt.read; }, function(v){ pt.read = v; });
+      chips(node.querySelector('.ac'), PUTT_READ, function(){ return pt.act; }, function(v){ pt.act = v; });
+      chips(node.querySelector('.ot'), PUTT_OUT, function(){ return pt.out; }, function(v){ pt.out = v; });
+    });
+  }
+  var TROUBLE = BUNK_KINDS.map(function(k){ return ['bunker', k[0], k[1]]; }).concat(PEN_KINDS.map(function(k){ return ['pen', k[0], k[1]]; }));
+  function drawTrouble(){
+    var box = el.querySelector('#trouble');
+    box.innerHTML = TROUBLE.map(function(t, i){
+      var v = c[t[0]][t[1]] || 0;
+      return '<div class="stp' + (v ? ' on' : '') + '" data-i="' + i + '"><span class="lbl">' + t[2] + '</span>' +
+        '<button class="mn" aria-label="one fewer">&minus;</button><b>' + v + '</b><button class="pl" aria-label="one more">+</button></div>';
+    }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.stp'), function(node){
+      var t = TROUBLE[+node.dataset.i];
+      function bump(d){ c[t[0]][t[1]] = Math.max(0, Math.min(9, (c[t[0]][t[1]] || 0) + d)); drawTrouble(); drawScore(); }
+      node.querySelector('.mn').onclick = function(){ bump(-1); };
+      node.querySelector('.pl').onclick = function(){ bump(1); };
+    });
+  }
+  function autoNow(){ return countedShots(h) + c.putts.length + penTotal(c); }
+  function drawScore(){
+    var auto = autoNow(), v = scoreTouched && c.score != null ? c.score : auto;
+    el.querySelector('#scoreStep').innerHTML =
+      '<div class="stp on"><span class="lbl">Strokes on hole ' + h.n + '</span>' +
+      '<button class="mn" aria-label="one fewer">&minus;</button><b>' + v + '</b><button class="pl" aria-label="one more">+</button></div>';
+    var st = el.querySelector('#scoreStep');
+    function bump(d){ c.score = Math.max(1, Math.min(20, v + d)); scoreTouched = true; drawScore(); }
+    st.querySelector('.mn').onclick = function(){ bump(-1); };
+    st.querySelector('.pl').onclick = function(){ bump(1); };
+    var why = countedShots(h) + ' shot' + (countedShots(h) === 1 ? '' : 's') + ' logged + ' + c.putts.length + ' putt' + (c.putts.length === 1 ? '' : 's') +
+      (penTotal(c) ? ' + ' + penTotal(c) + ' penalty' : '') + ' = ' + auto;
+    if (scoreTouched && c.score != null && c.score !== auto) why += ', set by hand to ' + c.score;
+    if (par) why += '  ·  ' + scoreName(v - par);
+    el.querySelector('#scoreWhy').textContent = why;
+  }
+  var par = parFor(h);
+  chips(el.querySelector('#parC'), ['3','4','5','6'], function(){ return par == null ? null : String(par); },
+    function(v){ par = v == null ? null : +v; drawScore(); });
+  drawCount(); drawPutts(); drawTrouble(); drawScore();
+  if (finish && !c.putts.length) setTimeout(function(){ ft.focus(); }, 50);
+
   el.querySelector('#cancel').onclick = function(){ closeSheet(); };
-  setTimeout(function(){ ft.focus(); }, 50);
-  el.querySelector('#fin').onclick = function(){
+  if (!finish){
+    el.querySelector('#move').onclick = function(){ commit(); closeSheet(true); enableMove('green', h.green); };
+    el.querySelector('#reopen').onclick = function(){
+      if (!confirm('Reopen hole ' + h.n + '? The green marker and everything on this card stay, but the hole counts as unfinished again.')) return;
+      var r = active(); h.green = null; r.cur = r.holes.indexOf(h); save(); closeSheet(true); renderHole(true);
+    };
+  }
+  function readCard(){
     var v = ft.value.trim();
     var feet = holed.checked ? 0 : (v === '' ? null : Number(v));
-    if (feet != null && (!isFinite(feet) || feet < 0)){ toast('Enter feet as a number, or leave it blank.'); return; }
-    var isHoled = holed.checked, p = putts;
+    if (feet != null && (!isFinite(feet) || feet < 0)) return null;
+    c.note = el.querySelector('#cnote').value.trim();
+    if (!scoreTouched) c.score = null;
+    return {feet:feet, holed:holed.checked};
+  }
+  el.querySelector('#fin').onclick = function(){
+    var got = readCard();
+    if (!got){ toast('Enter feet as a number, or leave it blank.'); return; }
+    setPar(h, par);
+    if (!finish){
+      h.card = c; h.green.feet = got.feet; h.green.holed = got.holed; h.green.putts = c.putts.length;
+      save(); closeSheet(true); renderHole(false); return;
+    }
     closeSheet(true);
     var gls = lockState();
-    var got = gls.locked ? (cap = null, Promise.resolve(Object.assign({}, gls.pos, {stale:false, ageS:0, weak:false}))) : awaitCapture();
-    got.then(function(pos){
+    var p = gls.locked ? (cap = null, Promise.resolve(Object.assign({}, gls.pos, {stale:false, ageS:0, weak:false}))) : awaitCapture();
+    p.then(function(pos){
       if (!pos){ toast('Hole not finished.'); return; }
       var closed = openShot(h);
-      h.green = Object.assign({lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), feet:feet, putts:p == null ? (isHoled ? 0 : null) : +p, holed:isHoled}, gpsQ(pos));
+      h.green = Object.assign({lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), feet:got.feet, putts:c.putts.length, holed:got.holed}, gpsQ(pos));
+      h.card = c;
       markPlaying(active());
       lastLog = {rid:active().id, shotId:null, greenOf:h.n, holesLen:active().holes.length, cur:active().cur, prevActive:S.activeId, prevPlaying:S.playingId, closedId:closed ? closed.id : null, club:closed ? closed.club : undefined};
-      var i = h.shots.length - 1, d = shotDistYd(h, i);
+      var i = h.shots.length - 1, d = shotDistYd(h, i), cs = h.shots[i];
       save();
-      var gpr = planResultFor(h, i), cs = h.shots[i];
-      showResult({main:(cs.club ? cs.club + ' · ' : '') + r0(d) + ' yd to the green',
-        sub:'Hole ' + h.n + ' done' + (gpr ? ' · ' + missText(gpr) + ' from your aim' : '') + (h.green.feet != null ? ' · ' + h.green.feet + ' ft to the pin' : ''),
-        h:h, shot:cs, ask:!cs.club});
+      var gpr = planResultFor(h, i), sc = holeScore(h);
+      showResult({main:'Hole ' + h.n + ' \u00b7 ' + sc + ' stroke' + (sc === 1 ? '' : 's'),
+        sub:(cs && cs.club ? cs.club + ' \u00b7 ' : '') + (d != null ? r0(d) + ' yd in' : '') + (gpr ? ' \u00b7 ' + missText(gpr) : '') +
+            (got.feet != null ? ' \u00b7 ' + got.feet + ' ft to the pin' : '') + (c.putts.length ? ' \u00b7 ' + c.putts.length + ' putts' : '') +
+            (penTotal(c) ? ' \u00b7 ' + penTotal(c) + ' penalty' : ''),
+        h:h, shot:cs, ask:cs && !cs.club});
       if (plan) endPlan(true);
       goNext();
     });
   };
-}
-
-/* ---------- edit ---------- */
-function enableMove(key, obj){
-  if (bearing){ setRotation('north'); toast('Map set back to north so you can drag the marker', 3500); }
-  var m = markers[key]; if (!m) return;
-  follow = false; m.dragging.enable();
-  toast('Drag the marker to the right spot, then release.', 4000);
-  m.once('dragend', function(e){
-    var ll = e.target.getLatLng();
-    obj.lat = ll.lat; obj.lng = ll.lng; obj.moved = true;
-    save(); renderHole(false); toast('Position updated');
-  });
-}
-function openShotEdit(h, i){
-  var s = h.shots[i], d = shotDistYd(h, i);
-  var clubs = S.settings.clubs.slice(); if (s.club && clubs.indexOf(s.club) < 0) clubs.unshift(s.club); if (!s.club) clubs.unshift('(not set)');
-  var el = openSheet(
-    '<h3>Hole ' + h.n + ' · Shot ' + (i+1) + '</h3>' +
-    '<div class="sub">' + (d != null ? r0(d) + ' yd total (GPS, to ' + shotEnd(h,i).type + ')' : 'Distance pending: set by your next shot or ON GREEN') +
-      ' · GPS ±' + r0(yd(s.acc || 0)) + ' yd (phone estimate)' + (s.moved ? ' · moved by hand' : '') + (s.stale ? ' · recorded from a ' + s.ageS + ' s old fix' : '') + (s.weak ? ' · weak GPS' : '') + '</div>' +
-    (s.plan ? '<div class="sub"><b>Plan:</b> aimed ' + r0(yd(distM(s, s.plan))) + ' yd with ' + esc(s.plan.club) + ' · pattern ' + patText(s.plan) +
-      (planResultFor(h, i) ? '<br><b>Result vs aim:</b> ' + missText(planResultFor(h, i)) + (planResultFor(h, i).inside ? ' · inside pattern' : ' · outside pattern') : '<br>Result vs aim appears after your next shot.') +
-      ' <button class="link" id="dropPlan">Remove plan</button></div>' : '') +
-    '<label class="fl">Club<select id="club">' + clubs.map(function(c){ return '<option' + ((c === s.club || (!s.club && c === '(not set)')) ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
-    '<div class="fl">Lie</div><div class="chips" id="lieC"></div>' +
-    '<div class="fl">Strike</div><div class="chips" id="stC"></div>' +
-    '<div class="fl">Miss</div><div class="chips" id="msC"></div>' +
-    '<label class="chk"><input type="checkbox" id="ex"' + (s.excluded ? ' checked' : '') + '> Exclude from club stats</label>' +
-    '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="del">Delete shot</button></div>' +
-    '<div class="stack"><button class="btn pri" id="done">Done</button></div>',
-    function(){ save(); renderHole(false); });
-  el.querySelector('#club').onchange = function(e){ s.club = e.target.value === '(not set)' ? null : e.target.value; save(); };
-  chips(el.querySelector('#lieC'), LIES, function(){ return s.lie || null; }, function(v){ s.lie = v; save(); });
-  chips(el.querySelector('#stC'), STRIKES, function(){ return s.strike || null; }, function(v){ s.strike = v; save(); });
-  missChips(el.querySelector('#msC'), function(){ return s.miss || []; }, function(v){ s.miss = v; save(); });
-  el.querySelector('#ex').onchange = function(e){ s.excluded = e.target.checked; save(); };
-  if (s.plan) el.querySelector('#dropPlan').onclick = function(){ if (confirm('Remove the aim point from this shot?')){ delete s.plan; save(); closeSheet(true); renderHole(false); } };
-  el.querySelector('#move').onclick = function(){ closeSheet(true); renderHole(false); enableMove(s.id, s); };
-  el.querySelector('#del').onclick = function(){
-    if (!confirm('Delete shot ' + (i+1) + ' (' + s.club + ')?')) return;
-    h.shots.splice(i, 1); save(); closeSheet(true); renderHole(false); toast('Shot deleted');
-  };
-  el.querySelector('#done').onclick = function(){ closeSheet(); };
-}
-function openGreenEdit(h){
-  var g = h.green, putts = g.putts == null ? null : String(g.putts);
-  var i = h.shots.length - 1, d = i >= 0 ? shotDistYd(h, i) : null;
-  var el = openSheet(
-    '<h3>Hole ' + h.n + ' · Green</h3>' +
-    '<div class="sub">' + (d != null ? 'Last shot (' + esc(h.shots[i].club) + '): ' + r0(d) + ' yd · ' : '') + 'GPS ±' + r0(yd(g.acc || 0)) + ' yd</div>' +
-    '<label class="fl">Feet to pin<input id="ft" type="number" inputmode="decimal" min="0" step="0.5" value="' + (g.feet == null ? '' : g.feet) + '"></label>' +
-    '<label class="chk"><input type="checkbox" id="holed"' + (g.holed ? ' checked' : '') + '> Holed out (0 ft)</label>' +
-    '<div class="fl">Putts (optional)</div><div class="chips" id="puttC"></div>' +
-    '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="reopen">Reopen hole</button></div>' +
-    '<div class="stack"><button class="btn pri" id="done">Done</button></div>',
-    function(){ commit(); });
-  var ft = el.querySelector('#ft'), holed = el.querySelector('#holed');
-  ft.disabled = !!g.holed;
-  chips(el.querySelector('#puttC'), ['0','1','2','3','4','5'], function(){ return putts; }, function(v){ putts = v; });
-  holed.onchange = function(){ ft.disabled = holed.checked; if (holed.checked) ft.value = '0'; };
-  function commit(){
-    var v = ft.value.trim(), f = holed.checked ? 0 : (v === '' ? null : Number(v));
-    if (f != null && (!isFinite(f) || f < 0)) f = g.feet;
-    g.feet = f; g.holed = holed.checked; g.putts = putts == null ? null : +putts;
-    save(); renderHole(false);
-  }
-  el.querySelector('#move').onclick = function(){ commit(); closeSheet(true); enableMove('green', g); };
-  el.querySelector('#reopen').onclick = function(){
-    if (!confirm('Reopen hole ' + h.n + '? This removes the green marker and feet to pin.')) return;
-    var r = active(); h.green = null; r.cur = r.holes.indexOf(h); save(); closeSheet(true); renderHole(true);
-  };
-  el.querySelector('#done').onclick = function(){ closeSheet(); };
 }
 
 /* ---------- shot planning ---------- */
@@ -1650,13 +1803,18 @@ function goToHole(n){
 function openHolePicker(){
   var r = active(), h = curHole();
   if (!r){ toast('Nothing to play yet: PLAN or RECORD starts a round.'); return; }
-  var played = {}; r.holes.forEach(function(x){ played[x.n] = x.shots.length || x.green ? 'played' : 'empty'; });
+  var played = {}, scored = {};
+  r.holes.forEach(function(x){
+    played[x.n] = x.shots.length || x.green ? 'played' : 'empty';
+    if (x.green) scored[x.n] = holeScore(x);
+  });
   var grid = '';
   for (var n = 1; n <= 18; n++){
-    grid += '<button class="chip' + (h && h.n === n ? ' on' : '') + (played[n] === 'played' ? ' sug' : '') + '" data-n="' + n + '">' + n + '</button>';
+    grid += '<button class="chip' + (h && h.n === n ? ' on' : '') + (played[n] === 'played' ? ' sug' : '') + '" data-n="' + n + '">' + n +
+      (scored[n] != null ? '<span style="font-weight:900"> \u00b7 ' + scored[n] + '</span>' : '') + '</button>';
   }
   var el = openSheet('<h3>Go to a hole</h3>' +
-    '<div class="sub">Skip any hole you do not want to track. Holes you have played are outlined.</div>' +
+    '<div class="sub">Skip any hole you do not want to track. Holes you have played are outlined, with your score beside the number.</div>' +
     '<div class="holegrid">' + grid + '</div>' +
     '<label class="fl">Another number<input id="hn" type="number" inputmode="numeric" min="1" max="36" placeholder="e.g. 19"></label>' +
     '<div class="row"><button class="btn ghost" id="close">Close</button><button class="btn pri" id="goNum">Go</button></div>');
@@ -1768,12 +1926,14 @@ function openStats(){
 function csvCell(v){ v = v == null ? '' : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
 function toCSV(rounds){
   var rows = [['date','course','hole','shot','club','lie','strike','miss','excluded','lat','lng','gps_acc_m','gps_fixes','moved_by_hand','gps_total_yd','measured_to','feet_to_pin','putts','holed',
+    'hole_par','hole_score','hole_putts','hole_penalties','hole_bunkers',
     'aim_lat','aim_lng','aim_yd','pattern','aim_miss_right_yd','aim_miss_long_yd','inside_pattern','gps_old_fix_used','gps_old_fix_age_s','gps_weak','gps_fix_lag_ms']];
   rounds.forEach(function(r){ r.holes.forEach(function(h){ h.shots.forEach(function(s, i){
     var e = shotEnd(h, i), d = e ? yd(distM(s, e.pt)) : null, lastOnGreen = i === h.shots.length - 1 && h.green;
     rows.push([isoDate(r.started), r.course, h.n, i+1, s.club || '', s.lie, s.strike, (s.miss || []).join('+'), s.excluded ? 1 : 0,
       s.lat.toFixed(7), s.lng.toFixed(7), s.acc, s.n, s.moved ? 1 : 0, d == null ? '' : d.toFixed(1), e ? e.type : '',
-      lastOnGreen ? h.green.feet : '', lastOnGreen ? h.green.putts : '', lastOnGreen ? (h.green.holed ? 1 : 0) : ''].concat((function(){
+      lastOnGreen ? h.green.feet : '', lastOnGreen ? h.green.putts : '', lastOnGreen ? (h.green.holed ? 1 : 0) : '',
+      parFor(h) || '', holeScore(h) == null ? '' : holeScore(h), puttCount(h), penTotal(cardOf(h)), bunkerTotal(cardOf(h))].concat((function(){
         if (!s.plan) return ['','','','','','',''];
         var pr = planResultFor(h, i);
         return [s.plan.lat.toFixed(7), s.plan.lng.toFixed(7), yd(distM(s, s.plan)).toFixed(1), patText(s.plan),
@@ -1783,6 +1943,47 @@ function toCSV(rounds){
   return rows.map(function(row){ return row.map(csvCell).join(','); }).join('\n');
 }
 window.__toCSV = toCSV;
+
+/* One row per hole: what you scored, how you putted, and what it cost you. */
+function puttText(pt){
+  var bits = [];
+  bits.push((pt.ft == null ? '?' : pt.ft) + 'ft');
+  if (pt.read) bits.push('read ' + pt.read);
+  if (pt.act) bits.push('broke ' + pt.act);
+  if (pt.out) bits.push(pt.out === 'In' ? 'holed' : 'missed ' + pt.out.toLowerCase());
+  return bits.join(' ');
+}
+function toCardCSV(rounds){
+  var rows = [['date','course','hole','par','score','to_par','shots_logged','putts',
+    'pen_water','pen_ob','pen_lost','pen_unplayable','bunker_fairway','bunker_greenside',
+    'feet_to_pin','holed','yards_tee_to_green','putt_detail','note']];
+  rounds.forEach(function(r){
+    r.holes.forEach(function(h){
+      if (!h.shots.length && !h.green) return;
+      var c = cardOf(h), par = courseParFor(r, h), sc = holeScore(h), g = courseGreenFor(r, h);
+      rows.push([isoDate(r.started), r.course, h.n, par || '', sc == null ? '' : sc,
+        (par && sc != null) ? (sc - par > 0 ? '+' : '') + (sc - par) : '',
+        h.shots.length, puttCount(h),
+        c ? c.pen.water : 0, c ? c.pen.ob : 0, c ? c.pen.lost : 0, c ? c.pen.unpl : 0,
+        c ? c.bunker.fw : 0, c ? c.bunker.gs : 0,
+        h.green && h.green.feet != null ? h.green.feet : '', h.green && h.green.holed ? 1 : 0,
+        (g && h.shots.length) ? yd(distM(h.shots[0], g)).toFixed(0) : '',
+        c && c.putts.length ? c.putts.map(puttText).join('; ') : '',
+        (c && c.note) || '']);
+    });
+  });
+  return rows.map(function(row){ return row.map(csvCell).join(','); }).join('\n');
+}
+/* course lookups that work for any round, not just the active one */
+function courseById(id){ for (var i = 0; i < S.courses.length; i++) if (S.courses[i].id === id) return S.courses[i]; return null; }
+function courseForRound(r){
+  if (r.courseId){ var c = courseById(r.courseId); if (c) return c; }
+  var name = (r.course || '').trim().toLowerCase();
+  return name ? (S.courses.filter(function(x){ return (x.name || '').trim().toLowerCase() === name; })[0] || null) : null;
+}
+function courseParFor(r, h){ var c = courseForRound(r); return (c && c.pars && c.pars[h.n]) || null; }
+function courseGreenFor(r, h){ var c = courseForRound(r); return (c && c.greens && c.greens[h.n]) || null; }
+window.__toCardCSV = toCardCSV;
 function download(name, text, type){
   var blob = new Blob([text], {type:type}), a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
@@ -1791,9 +1992,12 @@ function download(name, text, type){
 
 /* ---------- rounds ---------- */
 function roundSummary(r){
-  var holes = r.holes.filter(function(h){ return h.shots.length; }).length;
+  var sc = roundScore(r), putts = roundPutts(r);
   var shots = r.holes.reduce(function(t, h){ return t + h.shots.length; }, 0);
-  return holes + ' hole' + (holes === 1 ? '' : 's') + ' · ' + shots + ' shot' + (shots === 1 ? '' : 's');
+  return sc.holes + ' hole' + (sc.holes === 1 ? '' : 's') +
+    (sc.strokes ? ' · ' + sc.strokes + ' strokes' + (sc.toPar != null ? ' (' + (sc.toPar > 0 ? '+' : '') + sc.toPar + ')' : '') : '') +
+    (putts ? ' · ' + putts + ' putts' : '') +
+    ' · ' + shots + ' shot' + (shots === 1 ? '' : 's') + ' logged';
 }
 function openRounds(){
   var el = openSheet('<h3>Rounds</h3><div class="rlist" id="rl"></div><div class="stack"><button class="btn ghost" id="close">Close</button></div>');
@@ -1871,6 +2075,7 @@ function openMenu(){
     '<button id="mReview">Review this round</button>' +
     '<button id="mStats">Club distances</button>' +
     '<button id="mOffline">Offline maps</button>' +
+    '<button id="mCard">Export round cards (CSV)</button>' +
     '<button id="mCsv">Export all shots (CSV)</button>' +
     '<button id="mBackup">Backup data (JSON)</button>' +
     '<button id="mRestore">Restore from backup</button>' +
@@ -1896,6 +2101,7 @@ function openMenu(){
   el.querySelector('#mReview').onclick = function(){ closeSheet(true); openReview(); };
   el.querySelector('#mOffline').onclick = function(){ closeSheet(true); openOffline(); };
   el.querySelector('#mSettings').onclick = function(){ closeSheet(true); openSettings(); };
+  el.querySelector('#mCard').onclick = function(){ download('round-cards-' + isoDate(Date.now()) + '.csv', toCardCSV(S.rounds), 'text/csv'); };
   el.querySelector('#mCsv').onclick = function(){ download('shots-' + isoDate(Date.now()) + '.csv', toCSV(S.rounds), 'text/csv'); };
   el.querySelector('#mBackup').onclick = function(){
     if (trailDirty){ trailDirty = false; saveTrail(active()); }
@@ -2156,6 +2362,7 @@ function openGuide(){
       '<li><b>Your data lives on this phone only.</b> Use <i>Backup</i> now and then. It is a plain JSON file you own, and <i>Export</i> gives every shot as a spreadsheet.</li>' +
     '</ul></div>' +
 
+    '<div class="note" style="text-align:center">Version ' + APP_VERSION + '</div>' +
     '<div class="stack"><button class="btn pri" id="close">Let\'s play</button></div>' +
     '</div>');
   el.querySelector('#close').onclick = function(){ closeSheet(); };
@@ -2180,6 +2387,7 @@ $('#menuBtn').onclick = openMenu;
 $('#prevHole').onclick = function(){ var r = active(); if (r && r.cur > 0){ r.cur--; save(); renderHole(true); } };
 $('#nextHole').onclick = function(){
   var r = active(); if (!r){ toast('Nothing to play yet: PLAN or RECORD starts a round.'); return; }
+  if (nagUnfinished()) return;
   var h = curHole();
   if (r.cur < r.holes.length - 1) r.cur++;
   else { r.holes.push({n:nextN(h.n), shots:[], green:null}); r.cur = r.holes.length - 1; } // skipping holes is fine
