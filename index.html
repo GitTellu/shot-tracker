@@ -282,7 +282,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.4.0', SCHEMA = 3;
+var APP_VERSION = '1.4.1', SCHEMA = 3;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[]}; }
 function normalize(j){
   var d = defaults();
@@ -1347,6 +1347,40 @@ function drawPlan(){
   aimMarker.on('dragstart', function(){ aimDragging = true; follow = false; });
   aimMarker.on('drag', function(e){ var ll = e.target.getLatLng(); plan.aim = {lat:ll.lat, lng:ll.lng}; redrawShapeOnly(); renderPlanInfo(); });
   aimMarker.on('dragend', function(){ aimDragging = false; drawPlan(); });
+  attachAimDrag(aimMarker);
+}
+/* Moving the target while the map is turned. Leaflet's own marker drag follows the raw screen
+   delta, which pulls the wrong way once the map element is rotated, so the pointer moves are
+   turned back into the map's own frame here. Facing north, Leaflet's drag still does the work. */
+function attachAimDrag(m){
+  var el = m.getElement && m.getElement();
+  if (!el) return;
+  el.style.touchAction = 'none';
+  var drag = null;
+  function end(e){
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null; aimDragging = false;
+    if (plan) drawPlan();
+  }
+  el.addEventListener('pointerdown', function(e){
+    if (!plan || !bearing) return;  // facing north: Leaflet's marker drag is live, leave it alone
+    e.stopPropagation();            // keep the one-finger pan out of this gesture
+    drag = {id:e.pointerId, x:e.clientX, y:e.clientY, pt:map.latLngToContainerPoint(plan.aim)};
+    aimDragging = true; follow = false;
+    try { el.setPointerCapture(e.pointerId); } catch(err){}
+  });
+  el.addEventListener('pointermove', function(e){
+    if (!drag || e.pointerId !== drag.id || !plan) return;
+    e.stopPropagation();
+    var v = rotIn(e.clientX - drag.x, e.clientY - drag.y);
+    var ll = map.containerPointToLatLng([drag.pt.x + v.x, drag.pt.y + v.y]);
+    plan.aim = {lat:ll.lat, lng:ll.lng};
+    m.setLatLng(ll); redrawShapeOnly(); renderPlanInfo();
+  });
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  // a tap on the target itself must not re-aim to wherever the finger landed
+  el.addEventListener('click', function(e){ L.DomEvent.stop(e); });
 }
 function redrawShapeOnly(){
   // cheap redraw while dragging: rebuild everything except the marker being dragged
