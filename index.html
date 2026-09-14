@@ -65,7 +65,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 .plan{background:#fff3e0;color:#8a4b00;border:2px solid #ff9800}
 .plan.on{background:#ff9800;color:#111}
 #planBox{margin-top:6px}
-.planHead{display:flex;justify-content:space-between;align-items:flex-start}
+.planHead{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow:hidden}
+.planHead .pnum{font-size:26px;white-space:nowrap}
+.planHead .chip{padding:8px 10px;font-size:15px;flex:none}
+#planClubs{margin-top:4px}
+#planSub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pnum{font-size:34px;font-weight:900;line-height:1.05}
 .psub{color:var(--mut);font-size:13px}
 .planRow{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px;font-size:14px;font-weight:700}
@@ -104,6 +108,8 @@ input[type=range]{width:100%;margin:8px 0}
 .ritem .rb{display:flex;gap:8px}
 .ritem .rb button{flex:1;padding:9px;border-radius:10px;border:1.5px solid #bbb;background:#fff;font-weight:700;font-size:14px}
 .tag{display:inline-block;background:var(--g2);color:#fff;border-radius:6px;padding:1px 6px;font-size:11px;margin-left:6px;vertical-align:middle}
+.holegrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:10px 0}
+.holegrid .chip{padding:14px 0;font-size:17px;text-align:center}
 .tblwrap{overflow-x:auto;margin-top:8px}
 table.stats{border-collapse:collapse;width:100%;font-size:15px;font-variant-numeric:tabular-nums}
 table.stats th,table.stats td{padding:8px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
@@ -165,10 +171,17 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 <section id="panel">
   <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="greenBtn" class="link" hidden>On the green &#9873;</button></div>
   <div id="planBox" hidden>
-    <div class="planHead"><div><div id="planNum" class="pnum">— yd</div><div id="planSub" class="psub"></div></div><button id="planClose" class="link">Close</button></div>
-    <div class="chips" id="planClubs"></div>
-    <div class="planRow"><span id="planPat"></span><span><button id="pwMinus" class="mini" aria-label="Narrower">&minus;</button> <button id="pwPlus" class="mini" aria-label="Wider">+</button> <button id="planEdit" class="mini wide">Pattern</button></span></div>
-    <div class="row"><button id="markBtn" class="btn ghost">Just mark my spot</button><button id="goBtn" class="btn pri">Go</button></div>
+    <div class="planHead">
+      <div id="planNum" class="pnum">— yd</div>
+      <button id="planClubBtn" class="chip cchip">Club</button>
+      <button id="planEdit" class="chip" title="Pattern">&#9881;</button>
+      <button id="pwMinus" class="chip" aria-label="Narrower">&minus;</button>
+      <button id="pwPlus" class="chip" aria-label="Wider">+</button>
+      <button id="planClose" class="link">&#10005;</button>
+    </div>
+    <div class="psub" id="planSub"></div>
+    <div class="chips" id="planClubs" hidden></div>
+    <div class="row"><button id="markBtn" class="btn ghost">Just mark</button><button id="goBtn" class="btn pri">Go</button></div>
   </div>
   <div class="actions">
     <button id="planBtn" class="btn plan">PLAN</button>
@@ -269,7 +282,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.3.0', SCHEMA = 3;
+var APP_VERSION = '1.4.0', SCHEMA = 3;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[]}; }
 function normalize(j){
   var d = defaults();
@@ -676,6 +689,7 @@ function openPoint(r, i){
    corrected: taps are rotated back into the map's own frame, and one-finger panning is handled here
    (Leaflet's own drag would pull in the wrong direction). Pinch zoom stays with Leaflet. */
 var rotMode = 'north', bearing = 0, lastAutoAt = 0;
+var ROT_LABEL = {north:'N', auto:'UP', free:'°'};
 function bearingDeg(a, b){
   var A = toXY(a, b);
   return (Math.atan2(A.x, A.y) * 180 / Math.PI + 360) % 360;
@@ -686,8 +700,14 @@ function rotIn(dx, dy){ // screen delta -> map's own frame
   return {x:dx * c + dy * s, y:-dx * s + dy * c};
 }
 window.__rotIn = rotIn;
-function applyRotation(){
+function applyRotation(light){
   var el = $('#map'), wrap = $('#mapWrap');
+  if (light){ // live twisting: only the angle changes
+    el.style.transform = bearing ? 'rotate(' + cssAngle().toFixed(1) + 'deg)' : '';
+    document.documentElement.style.setProperty('--unrot', (-cssAngle()).toFixed(1) + 'deg');
+    $('#rotBtn').textContent = r0(bearing) + '°';
+    return;
+  }
   var w = wrap.clientWidth, h = wrap.clientHeight;
   if (bearing){
     var d = Math.ceil(Math.sqrt(w * w + h * h));
@@ -700,7 +720,7 @@ function applyRotation(){
   document.documentElement.style.setProperty('--unrot', (-cssAngle()).toFixed(1) + 'deg');
   if (map.dragging){ if (bearing) map.dragging.disable(); else map.dragging.enable(); }
   if (aimMarker && aimMarker.dragging){ if (bearing) aimMarker.dragging.disable(); else aimMarker.dragging.enable(); }
-  $('#rotBtn').textContent = rotMode === 'north' ? 'N' : (bearing ? r0(bearing) + '°' : 'UP');
+  $('#rotBtn').textContent = rotMode === 'north' ? 'N' : (bearing ? r0(bearing) + '°' : ROT_LABEL[rotMode]);
   $('#rotBtn').classList.toggle('on', rotMode !== 'north');
   map.invalidateSize();
 }
@@ -708,6 +728,18 @@ function autoBearing(){
   if (plan && fix) return bearingDeg({lat:fix.lat, lng:fix.lng}, plan.aim);
   var h = curHole(), open = openShot(h);
   if (open && fix && distM(open, fix) > 15) return bearingDeg(open, {lat:fix.lat, lng:fix.lng});
+  return walkBearing();
+}
+/* the way you have been walking, from the breadcrumb trail: usually straight down the hole */
+function walkBearing(){
+  var r = active(); if (!r || !fix) return null;
+  var tr = getTrail(r); if (!tr || tr.length < 2) return null;
+  var now = Math.round(Date.now() / 1000);
+  for (var i = tr.length - 1; i >= 0; i--){
+    if (now - tr[i][2] > 240) break;
+    var p = {lat:tr[i][0], lng:tr[i][1]};
+    if (distM(p, fix) > 25) return bearingDeg(p, {lat:fix.lat, lng:fix.lng});
+  }
   return null;
 }
 function updateAutoBearing(force){
@@ -722,14 +754,20 @@ function updateAutoBearing(force){
 function setRotation(mode){
   rotMode = mode;
   if (mode === 'north'){ bearing = 0; applyRotation(); toast('Map facing north'); return; }
+  if (mode === 'free'){ applyRotation(); toast('Free spin: twist with two fingers to turn the map', 3500); return; }
   var b = autoBearing();
-  if (b == null){ rotMode = 'north'; bearing = 0; applyRotation(); toast('Nothing to point at yet: plan a shot, or mark your ball and walk.', 4000); return; }
+  if (b == null){ // nothing to point at yet, so let the golfer spin it by hand instead of refusing
+    rotMode = 'free'; applyRotation();
+    toast('Twist with two fingers to line the hole up, then set your aim', 4500); return;
+  }
   bearing = b; lastAutoAt = Date.now(); applyRotation();
   toast('Map turned so your shot plays up the screen');
 }
+function cycleRotation(){ setRotation(rotMode === 'north' ? 'auto' : (rotMode === 'auto' ? 'free' : 'north')); }
 window.__mousePos = function(x, y){ var pt = L.DomEvent.getMousePosition({clientX:x, clientY:y}, $('#map')); return {x:pt.x, y:pt.y}; };
 window.__rotState = function(){ return {mode:rotMode, bearing:bearing, css:$('#map').style.transform, size:[$('#map').style.width, $('#map').style.height]}; };
 window.__setRotation = setRotation;
+window.__cycleRotation = cycleRotation;
 
 /* taps and clicks: undo the rotation so Leaflet gets the right point */
 (function(){
@@ -746,13 +784,32 @@ window.__setRotation = setRotation;
 
 /* one-finger panning while rotated */
 (function(){
-  var wrap, active = null, moved = false;
+  var wrap, active = null, moved = false, pts = {}, twist = null;
+  function angleOf(a, b){ return Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI; }
+  function ids(){ return Object.keys(pts); }
   function down(e){
+    pts[e.pointerId] = {x:e.clientX, y:e.clientY};
+    if (ids().length === 2){ // two fingers: start a twist, and stop any one-finger pan
+      var k = ids(); twist = {a:k[0], b:k[1], start:angleOf(pts[k[0]], pts[k[1]]), bearing0:bearing, applied:false};
+      active = null;
+      return;
+    }
     if (!bearing || e.isPrimary === false) return;
-    if (e.pointerType === 'touch' && e.touches && e.touches.length > 1) return;
     active = {id:e.pointerId, x:e.clientX, y:e.clientY}; moved = false;
   }
+  function twistMove(e){
+    if (!twist || !pts[twist.a] || !pts[twist.b]) return false;
+    var d = angleOf(pts[twist.a], pts[twist.b]) - twist.start;
+    while (d > 180) d -= 360; while (d < -180) d += 360;
+    if (!twist.applied && Math.abs(d) < 8) return true;       // ignore small wobble during a pinch
+    if (!twist.applied){ twist.applied = true; if (rotMode !== 'free'){ rotMode = 'free'; } if (!bearing){ bearing = 0.01; applyRotation(); } }
+    bearing = (twist.bearing0 - d + 360) % 360;
+    applyRotation(true);
+    return true;
+  }
   function move(e){
+    if (pts[e.pointerId]){ pts[e.pointerId] = {x:e.clientX, y:e.clientY}; }
+    if (twist && twistMove(e)) return;
     if (!active || e.pointerId !== active.id) return;
     var dx = e.clientX - active.x, dy = e.clientY - active.y;
     if (!moved && Math.hypot(dx, dy) < 4) return;
@@ -761,7 +818,11 @@ window.__setRotation = setRotation;
     map.panBy([-v.x, -v.y], {animate:false});
     active.x = e.clientX; active.y = e.clientY;
   }
-  function up(e){ if (active && e.pointerId === active.id) active = null; }
+  function up(e){
+    delete pts[e.pointerId];
+    if (twist && ids().length < 2){ twist = null; applyRotation(); }
+    if (active && e.pointerId === active.id) active = null;
+  }
   function attach(){
     wrap = $('#mapWrap');
     wrap.addEventListener('pointerdown', down, {passive:true});
@@ -913,7 +974,7 @@ function undoLast(){
     while (r.holes.length > u.holesLen && !r.holes[r.holes.length - 1].shots.length) r.holes.pop();
     r.cur = Math.min(u.cur, r.holes.length - 1);
   }
-  if (u.plan){ plan = u.plan; planKey = holeKey(); $('#planBtn').classList.add('on'); renderPlanBox(); }
+  if (u.plan){ plan = u.plan; planKey = holeKey(); $('#planBtn').classList.add('on'); renderPlanBox(false); }
   save(); renderHole(false); toast('Undone');
 }
 
@@ -931,7 +992,7 @@ function ensureHole(snap){
   if (h.green){
     var lastIdx = r.holes.length - 1, tgt = r.holes[lastIdx];
     var label = tgt.green ? nextN(tgt.n) : tgt.n;
-    if (!confirm('Hole ' + h.n + ' is finished. Start hole ' + label + '?')) return null;
+    if (!confirm('Hole ' + h.n + ' is finished. Start hole ' + label + '?\n\nCancel, then tap the hole number at the top to jump to any hole.')) return null;
     var keepPlan = plan; r.cur = lastIdx;
     if (tgt.green){ r.holes.push({n:nextN(tgt.n), shots:[], green:null}); r.cur = r.holes.length - 1; }
     save(); if (keepPlan) planKey = holeKey(); renderHole(true); h = curHole();
@@ -1261,7 +1322,7 @@ function startPlan(){
   plan.pat = patYards(patternFor(plan.club));
   follow = false; planKey = holeKey();
   $('#planBtn').classList.add('on'); $('#planBtn').textContent = 'CANCEL'; $('#statusLine').hidden = true;
-  renderPlanBox(); drawPlan(); updateAutoBearing(true);
+  renderPlanBox(!plan.club); drawPlan(); updateAutoBearing(true);
   toast('Drag the target, or tap the map, to set your aim.', 3500);
 }
 function holeKey(){ var r = active(); return (S.activeId || '') + ':' + (r ? r.cur : ''); }
@@ -1301,21 +1362,23 @@ function renderPlanInfo(){
   if (!plan) return;
   var st = planStart(), d = st ? yd(distM(st, plan.aim)) : null;
   $('#planNum').textContent = (d == null ? '—' : r0(d)) + ' yd to aim';
-  var sug = d != null ? suggestClub(d) : null;
-  if (fix && Date.now() - fix.t > STALE_FIX_MS){ $('#planSub').textContent = 'Your GPS position is ' + Math.round((Date.now() - fix.t) / 1000) + ' s old. Yardage updates when a fresh fix arrives.'; }
-  else $('#planSub').textContent = sug ? 'Your ' + sug.club + ' median: ' + r0(sug.median) + ' yd (' + sug.n + ' shots, total distance)' : 'Club suggestions appear once a club has 3+ measured shots.';
-  $('#planPat').textContent = patShort(plan.pat);
+  var sug = d != null ? suggestClub(d) : null, sub = $('#planSub');
+  if (fix && Date.now() - fix.t > STALE_FIX_MS) sub.textContent = 'GPS is ' + Math.round((Date.now() - fix.t) / 1000) + ' s old';
+  else sub.textContent = patShort(plan.pat) + (sug ? ' · your ' + sug.club + ' median ' + r0(sug.median) + ' yd' : '');
   Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){ b.classList.toggle('sug', !!sug && b.textContent === sug.club); });
 }
-function renderPlanBox(){
+function renderPlanBox(keepOpen){
   $('#planBox').hidden = false;
-  var clubs = S.settings.clubs;
-  $('#planClubs').innerHTML = clubs.map(function(c, i){ return '<button class="chip' + (c === plan.club ? ' on' : '') + '" data-i="' + i + '">' + esc(c) + '</button>'; }).join('');
-  Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){
-    b.onclick = function(){ plan.club = clubs[+b.dataset.i]; plan.pat = patYards(patternFor(plan.club)); renderPlanBox(); drawPlan(); };
+  var clubs = S.settings.clubs, box = $('#planClubs');
+  $('#planClubBtn').textContent = (plan.club || 'Club') + ' \u25BE';
+  box.hidden = !keepOpen;
+  box.innerHTML = clubs.map(function(c, i){ return '<button class="chip' + (c === plan.club ? ' on' : '') + '" data-i="' + i + '">' + esc(c) + '</button>'; }).join('');
+  Array.prototype.forEach.call(box.querySelectorAll('.chip'), function(b){
+    b.onclick = function(){ plan.club = clubs[+b.dataset.i]; plan.pat = patYards(patternFor(plan.club)); renderPlanBox(false); drawPlan(); layout(); };
   });
-  var on = $('#planClubs').querySelector('.chip.on'); if (on && on.scrollIntoView) on.scrollIntoView({inline:'center', block:'nearest'});
+  if (keepOpen){ var on = box.querySelector('.chip.on'); if (on && on.scrollIntoView) on.scrollIntoView({inline:'center', block:'nearest'}); }
   renderPlanInfo();
+  layout();
 }
 function nudgeWidth(delta){
   if (!plan) return;
@@ -1355,10 +1418,40 @@ function openPatternEdit(club){
   el.querySelector('#cancel').onclick = function(){ closeSheet(); };
   el.querySelector('#savep').onclick = function(){
     draw(); S.settings.patterns[club] = p; save(); closeSheet(true);
-    if (plan && plan.club === club){ plan.pat = patYards(p); renderPlanInfo(); drawPlan(); }
+    if (plan && plan.club === club){ plan.pat = patYards(p); renderPlanBox(false); drawPlan(); }
     toast('Pattern saved for ' + club);
   };
   draw();
+}
+
+/* ---------- jumping between holes (skipping any you do not want to track) ---------- */
+function goToHole(n){
+  var r = active(); if (!r) return;
+  for (var i = 0; i < r.holes.length; i++) if (r.holes[i].n === n){ r.cur = i; save(); renderHole(true); return; }
+  r.holes.push({n:n, shots:[], green:null}); r.cur = r.holes.length - 1; save(); renderHole(true);
+}
+function openHolePicker(){
+  var r = active(), h = curHole();
+  if (!r){ toast('Nothing to play yet: PLAN or RECORD starts a round.'); return; }
+  var played = {}; r.holes.forEach(function(x){ played[x.n] = x.shots.length || x.green ? 'played' : 'empty'; });
+  var grid = '';
+  for (var n = 1; n <= 18; n++){
+    grid += '<button class="chip' + (h && h.n === n ? ' on' : '') + (played[n] === 'played' ? ' sug' : '') + '" data-n="' + n + '">' + n + '</button>';
+  }
+  var el = openSheet('<h3>Go to a hole</h3>' +
+    '<div class="sub">Skip any hole you do not want to track. Holes you have played are outlined.</div>' +
+    '<div class="holegrid">' + grid + '</div>' +
+    '<label class="fl">Another number<input id="hn" type="number" inputmode="numeric" min="1" max="36" placeholder="e.g. 19"></label>' +
+    '<div class="row"><button class="btn ghost" id="close">Close</button><button class="btn pri" id="goNum">Go</button></div>');
+  Array.prototype.forEach.call(el.querySelectorAll('.holegrid .chip'), function(b){
+    b.onclick = function(){ closeSheet(true); goToHole(+b.dataset.n); };
+  });
+  el.querySelector('#goNum').onclick = function(){
+    var n = parseInt(el.querySelector('#hn').value, 10);
+    if (!(n >= 1 && n <= 36)){ toast('Enter a hole number from 1 to 36.'); return; }
+    closeSheet(true); goToHole(n);
+  };
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
 }
 
 /* ---------- review a round ---------- */
@@ -1826,7 +1919,8 @@ function openGuide(){
       '<li><b>Took a drop or re-teed?</b> The shot before it now measures to your drop, not to where the ball finished. Tap that shot\'s pin and choose <i>Exclude from club stats</i>.</li>' +
       '<li><b>Tap the flag</b> to edit feet to pin, putts, or reopen a hole.</li>' +
       '<li><b>Tap the hole number</b> to renumber it, for example when you start on 10. Use ' + k('‹') + ' ' + k('›') + ' to move between holes.</li>' +
-      '<li><b>Turn the map</b> with the ' + k('N') + ' button on the right. It swings the hole so your shot plays up the screen, which suits a phone held upright. Tap it again for north up. While the map is turned, drag to pan and tap the map to move your target; dragging markers needs north up, and the app sets that for you.</li>' +
+      '<li><b>Turn the map</b> two ways. <b>Twist with two fingers</b> to spin it wherever you like, at any time. Or tap ' + k('N') + ' on the right to cycle north up, shot up (it points at your target, or the way you are walking), and free spin. Your own twist is kept until you tap ' + k('N') + '. While the map is turned, drag to pan and tap to move your target; dragging markers needs north up, and the app switches for you.</li>' +
+      '<li><b>Skip any hole.</b> Tap the hole number at the top to jump straight to another hole. Nothing has to be filled in for the holes in between, and the arrows move on whether or not you logged anything.</li>' +
       '<li>' + k('☰') + ' <i>Club distances</i> shows your averages, medians and spread, plus aim results for planned shots. <i>Export</i> and <i>Backup</i> are in the same menu.</li>' +
       '<li>The map button cycles map types, and ' + k('◎') + ' re-centers on you.</li>' +
     '</ul>' +
@@ -1858,23 +1952,19 @@ $('#planClose').onclick = function(){ endPlan(); };
 $('#pwMinus').onclick = function(){ nudgeWidth(-5); };
 $('#pwPlus').onclick = function(){ nudgeWidth(5); };
 $('#planEdit').onclick = function(){ if (plan) openPatternEdit(plan.club); };
+$('#planClubBtn').onclick = function(){ if (plan) renderPlanBox($('#planClubs').hidden); };
 $('#greenBtn').onclick = onGreen;
 $('#menuBtn').onclick = openMenu;
 $('#prevHole').onclick = function(){ var r = active(); if (r && r.cur > 0){ r.cur--; save(); renderHole(true); } };
 $('#nextHole').onclick = function(){
-  var r = active(); if (!r) return;
+  var r = active(); if (!r){ toast('Nothing to play yet: PLAN or RECORD starts a round.'); return; }
   var h = curHole();
   if (r.cur < r.holes.length - 1) r.cur++;
-  else if (h.shots.length) { r.holes.push({n:nextN(h.n), shots:[], green:null}); r.cur = r.holes.length - 1; }
-  else { toast('Log a shot on this hole first.'); return; }
+  else { r.holes.push({n:nextN(h.n), shots:[], green:null}); r.cur = r.holes.length - 1; } // skipping holes is fine
   save(); renderHole(true);
 };
-$('#holeLabel').onclick = function(){
-  var h = curHole(); if (!h) return;
-  var v = prompt('Hole number', h.n); if (v === null) return;
-  var n = parseInt(v, 10); if (n >= 1 && n <= 36){ h.n = n; save(); renderHole(false); } else toast('Enter a hole number from 1 to 36.');
-};
-$('#rotBtn').onclick = function(){ setRotation(rotMode === 'north' ? 'auto' : 'north'); };
+$('#holeLabel').onclick = openHolePicker;
+$('#rotBtn').onclick = cycleRotation;
 $('#centerBtn').onclick = function(){ follow = true; if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); else toast('Waiting for GPS'); };
 $('#layerBtn').onclick = function(){
   var st = S.settings, order = [];
