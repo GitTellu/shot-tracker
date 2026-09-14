@@ -19,7 +19,12 @@
 [hidden]{display:none!important}
 html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:#e9ece9;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
 button{font:inherit;color:inherit;cursor:pointer}
-#map{position:fixed;top:0;left:0;right:0;bottom:200px;background:#cfd8cf}
+#mapWrap{position:fixed;top:0;left:0;right:0;bottom:200px;overflow:hidden;background:#cfd8cf}
+#map{position:absolute;top:0;left:0;width:100%;height:100%;background:#cfd8cf;transform-origin:50% 50%}
+/* keep pins, flags and labels upright when the map is turned */
+.pin,.flag,.aimx,.aimo,.ptdot,.urot{transform:rotate(var(--unrot,0deg))}
+#rotBtn{font-size:15px;font-weight:900;letter-spacing:.5px}
+#rotBtn.on{background:var(--g2);color:#fff}
 #top{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;display:flex;align-items:center;gap:8px;z-index:1000;pointer-events:none}
 #top>*{pointer-events:auto}
 .ib{width:44px;height:44px;border-radius:12px;border:0;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35);font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center}
@@ -139,7 +144,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 </style>
 </head>
 <body>
-<div id="map"></div>
+<div id="mapWrap"><div id="map"></div></div>
 
 <header id="top">
   <button id="menuBtn" class="ib" aria-label="Menu">&#9776;</button>
@@ -152,6 +157,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 </header>
 
 <div id="fabs">
+  <button id="rotBtn" class="ib" aria-label="Map rotation" title="North up / shot up">N</button>
   <button id="layerBtn" class="ib" aria-label="Map type" title="Street / Satellite">&#9707;</button>
   <button id="centerBtn" class="ib" aria-label="Center on me" title="Center on me">&#9678;</button>
 </div>
@@ -263,7 +269,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.2.0', SCHEMA = 3;
+var APP_VERSION = '1.3.0', SCHEMA = 3;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[]}; }
 function normalize(j){
   var d = defaults();
@@ -495,7 +501,7 @@ function onPos(p, requested){
       trailLine.addLatLng(ll); trailDirty = true;
     }
   }
-  gpsPill(); updateLive(); maybeAutoPoint();
+  gpsPill(); updateLive(); maybeAutoPoint(); updateAutoBearing();
   if (plan && !aimDragging){ redrawShapeOnly(); renderPlanInfo(); }
 }
 function onErr(e){
@@ -665,12 +671,113 @@ function openPoint(r, i){
   el.querySelector('#close').onclick = function(){ closeSheet(); };
 }
 
+/* ---------- map rotation ----------
+   Leaflet has no rotation, so the map element itself is turned with CSS and the touch input is
+   corrected: taps are rotated back into the map's own frame, and one-finger panning is handled here
+   (Leaflet's own drag would pull in the wrong direction). Pinch zoom stays with Leaflet. */
+var rotMode = 'north', bearing = 0, lastAutoAt = 0;
+function bearingDeg(a, b){
+  var A = toXY(a, b);
+  return (Math.atan2(A.x, A.y) * 180 / Math.PI + 360) % 360;
+}
+function cssAngle(){ return -bearing; }
+function rotIn(dx, dy){ // screen delta -> map's own frame
+  var t = cssAngle() * Math.PI / 180, c = Math.cos(t), s = Math.sin(t);
+  return {x:dx * c + dy * s, y:-dx * s + dy * c};
+}
+window.__rotIn = rotIn;
+function applyRotation(){
+  var el = $('#map'), wrap = $('#mapWrap');
+  var w = wrap.clientWidth, h = wrap.clientHeight;
+  if (bearing){
+    var d = Math.ceil(Math.sqrt(w * w + h * h));
+    el.style.width = d + 'px'; el.style.height = d + 'px';
+    el.style.left = Math.round((w - d) / 2) + 'px'; el.style.top = Math.round((h - d) / 2) + 'px';
+  } else {
+    el.style.width = '100%'; el.style.height = '100%'; el.style.left = '0'; el.style.top = '0';
+  }
+  el.style.transform = bearing ? 'rotate(' + cssAngle().toFixed(1) + 'deg)' : '';
+  document.documentElement.style.setProperty('--unrot', (-cssAngle()).toFixed(1) + 'deg');
+  if (map.dragging){ if (bearing) map.dragging.disable(); else map.dragging.enable(); }
+  if (aimMarker && aimMarker.dragging){ if (bearing) aimMarker.dragging.disable(); else aimMarker.dragging.enable(); }
+  $('#rotBtn').textContent = rotMode === 'north' ? 'N' : (bearing ? r0(bearing) + '°' : 'UP');
+  $('#rotBtn').classList.toggle('on', rotMode !== 'north');
+  map.invalidateSize();
+}
+function autoBearing(){
+  if (plan && fix) return bearingDeg({lat:fix.lat, lng:fix.lng}, plan.aim);
+  var h = curHole(), open = openShot(h);
+  if (open && fix && distM(open, fix) > 15) return bearingDeg(open, {lat:fix.lat, lng:fix.lng});
+  return null;
+}
+function updateAutoBearing(force){
+  if (rotMode !== 'auto') return;
+  if (!force && Date.now() - lastAutoAt < 2000) return;
+  var b = autoBearing();
+  if (b == null) return;
+  var diff = Math.abs(((b - bearing + 540) % 360) - 180);
+  if (!force && diff < 5) return;
+  lastAutoAt = Date.now(); bearing = b; applyRotation();
+}
+function setRotation(mode){
+  rotMode = mode;
+  if (mode === 'north'){ bearing = 0; applyRotation(); toast('Map facing north'); return; }
+  var b = autoBearing();
+  if (b == null){ rotMode = 'north'; bearing = 0; applyRotation(); toast('Nothing to point at yet: plan a shot, or mark your ball and walk.', 4000); return; }
+  bearing = b; lastAutoAt = Date.now(); applyRotation();
+  toast('Map turned so your shot plays up the screen');
+}
+window.__mousePos = function(x, y){ var pt = L.DomEvent.getMousePosition({clientX:x, clientY:y}, $('#map')); return {x:pt.x, y:pt.y}; };
+window.__rotState = function(){ return {mode:rotMode, bearing:bearing, css:$('#map').style.transform, size:[$('#map').style.width, $('#map').style.height]}; };
+window.__setRotation = setRotation;
+
+/* taps and clicks: undo the rotation so Leaflet gets the right point */
+(function(){
+  var orig = L.DomEvent.getMousePosition;
+  L.DomEvent.getMousePosition = function(e, container){
+    if (bearing && container === $('#map')){
+      var r = container.getBoundingClientRect();
+      var p = rotIn(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+      return new L.Point(p.x + container.offsetWidth / 2, p.y + container.offsetHeight / 2);
+    }
+    return orig.call(this, e, container);
+  };
+})();
+
+/* one-finger panning while rotated */
+(function(){
+  var wrap, active = null, moved = false;
+  function down(e){
+    if (!bearing || e.isPrimary === false) return;
+    if (e.pointerType === 'touch' && e.touches && e.touches.length > 1) return;
+    active = {id:e.pointerId, x:e.clientX, y:e.clientY}; moved = false;
+  }
+  function move(e){
+    if (!active || e.pointerId !== active.id) return;
+    var dx = e.clientX - active.x, dy = e.clientY - active.y;
+    if (!moved && Math.hypot(dx, dy) < 4) return;
+    moved = true; follow = false;
+    var v = rotIn(dx, dy);
+    map.panBy([-v.x, -v.y], {animate:false});
+    active.x = e.clientX; active.y = e.clientY;
+  }
+  function up(e){ if (active && e.pointerId === active.id) active = null; }
+  function attach(){
+    wrap = $('#mapWrap');
+    wrap.addEventListener('pointerdown', down, {passive:true});
+    wrap.addEventListener('pointermove', move, {passive:true});
+    wrap.addEventListener('pointerup', up, {passive:true});
+    wrap.addEventListener('pointercancel', up, {passive:true});
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach); else attach();
+})();
+
 /* ---------- rendering ---------- */
 function layout(){
   var ph = $('#panel').offsetHeight;
-  $('#map').style.bottom = Math.max(0, ph - 18) + 'px';
+  $('#mapWrap').style.bottom = Math.max(0, ph - 18) + 'px';
   $('#fabs').style.bottom = (ph + 26) + 'px';
-  map.invalidateSize();
+  applyRotation();
 }
 if (window.ResizeObserver) new ResizeObserver(layout).observe($('#panel'));
 window.addEventListener('resize', layout);
@@ -679,6 +786,12 @@ function pinIcon(i, ex){ return L.divIcon({className:'', html:'<div class="pin' 
 var pointIcon = L.divIcon({className:'', html:'<div class="ptdot"></div>', iconSize:[12,12], iconAnchor:[6,6]});
 var flagIcon = L.divIcon({className:'', html:'<div class="flag">&#9873;</div>', iconSize:[30,30], iconAnchor:[15,15]});
 
+function fitPadding(){
+  var el = $('#map'), wrap = $('#mapWrap');
+  var px = Math.max(50, (el.offsetWidth - wrap.clientWidth) / 2 + 40);
+  var py = Math.max(50, (el.offsetHeight - wrap.clientHeight) / 2 + 40);
+  return [px, py];
+}
 function renderHole(fit){
   if (plan && planKey !== holeKey()) endPlan(true);
   holeLayer.clearLayers(); markers = {};
@@ -691,14 +804,14 @@ function renderHole(fit){
       if (e){
         var d = yd(distM(s, e.pt));
         L.polyline([[s.lat,s.lng],[e.pt.lat,e.pt.lng]], {color:s.excluded ? '#9e9e9e' : '#ff9800', weight:4, opacity:0.95})
-          .bindTooltip(r0(d) + ' yd · ' + esc(s.club || 'club?'), {permanent:true, direction:'center', className:'dtip'})
+          .bindTooltip('<span class="urot">' + r0(d) + ' yd · ' + esc(s.club || 'club?') + '</span>', {permanent:true, direction:'center', className:'dtip'})
           .addTo(holeLayer);
       }
       if (s.plan){
         var am = L.marker([s.plan.lat, s.plan.lng], {icon:aimDoneIcon, interactive:false}).addTo(holeLayer);
         var pr = planResultFor(h, i);
         if (e && pr) L.polyline([[s.plan.lat, s.plan.lng], [e.pt.lat, e.pt.lng]], {color:'#ff9800', weight:2, dashArray:'4 6', opacity:0.9})
-          .bindTooltip(missText(pr), {permanent:true, direction:'center', className:'dtip'}).addTo(holeLayer);
+          .bindTooltip('<span class="urot">' + missText(pr) + '</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(holeLayer);
       }
       var m = L.marker([s.lat, s.lng], {icon:pinIcon(i+1, s.excluded), zIndexOffset:1000}).addTo(holeLayer);
       m.on('click', function(){ openShotEdit(h, i); });
@@ -706,7 +819,7 @@ function renderHole(fit){
     });
     if (h.green){
       var gm = L.marker([h.green.lat, h.green.lng], {icon:flagIcon, zIndexOffset:1100}).addTo(holeLayer);
-      gm.bindTooltip((h.green.feet == null ? '?' : h.green.feet) + ' ft', {permanent:true, direction:'right', offset:[14,0], className:'dtip'});
+      gm.bindTooltip('<span class="urot">' + (h.green.feet == null ? '?' : h.green.feet) + ' ft</span>', {permanent:true, direction:'right', offset:[14,0], className:'dtip'});
       gm.on('click', function(){ openGreenEdit(h); });
       markers.green = gm;
     }
@@ -714,7 +827,7 @@ function renderHole(fit){
       var pts = h.shots.map(function(s){ return [s.lat, s.lng]; });
       if (h.green) pts.push([h.green.lat, h.green.lng]);
       if (fix && !h.green) pts.push([fix.lat, fix.lng]);
-      if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:[50,50], maxZoom:19}); }
+      if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); }
       else if (fix){ follow = true; map.setView([fix.lat, fix.lng], 18); }
     }
   }
@@ -971,6 +1084,7 @@ function onGreen(){
 
 /* ---------- edit ---------- */
 function enableMove(key, obj){
+  if (bearing){ setRotation('north'); toast('Map set back to north so you can drag the marker', 3500); }
   var m = markers[key]; if (!m) return;
   follow = false; m.dragging.enable();
   toast('Drag the marker to the right spot, then release.', 4000);
@@ -1147,7 +1261,7 @@ function startPlan(){
   plan.pat = patYards(patternFor(plan.club));
   follow = false; planKey = holeKey();
   $('#planBtn').classList.add('on'); $('#planBtn').textContent = 'CANCEL'; $('#statusLine').hidden = true;
-  renderPlanBox(); drawPlan();
+  renderPlanBox(); drawPlan(); updateAutoBearing(true);
   toast('Drag the target, or tap the map, to set your aim.', 3500);
 }
 function holeKey(){ var r = active(); return (S.activeId || '') + ':' + (r ? r.cur : ''); }
@@ -1167,8 +1281,8 @@ function drawPlan(){
   var poly = patternPolygon(st, plan.aim, plan.pat);
   if (poly.length) L.polygon(poly, {color:'#ff9800', weight:2, fillColor:'#ff9800', fillOpacity:0.18, interactive:false}).addTo(planLayer);
   L.polyline([[st.lat, st.lng], [plan.aim.lat, plan.aim.lng]], {color:'#ffffff', weight:3, opacity:0.95, interactive:false})
-    .bindTooltip(r0(yd(distM(st, plan.aim))) + ' yd', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
-  aimMarker = L.marker([plan.aim.lat, plan.aim.lng], {icon:aimIcon, draggable:true, zIndexOffset:2000}).addTo(planLayer);
+    .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
+  aimMarker = L.marker([plan.aim.lat, plan.aim.lng], {icon:aimIcon, draggable:!bearing, zIndexOffset:2000}).addTo(planLayer);
   aimMarker.on('dragstart', function(){ aimDragging = true; follow = false; });
   aimMarker.on('drag', function(e){ var ll = e.target.getLatLng(); plan.aim = {lat:ll.lat, lng:ll.lng}; redrawShapeOnly(); renderPlanInfo(); });
   aimMarker.on('dragend', function(){ aimDragging = false; drawPlan(); });
@@ -1180,7 +1294,7 @@ function redrawShapeOnly(){
   var poly = patternPolygon(st, plan.aim, plan.pat);
   if (poly.length) L.polygon(poly, {color:'#ff9800', weight:2, fillColor:'#ff9800', fillOpacity:0.18, interactive:false}).addTo(planLayer);
   L.polyline([[st.lat, st.lng], [plan.aim.lat, plan.aim.lng]], {color:'#ffffff', weight:3, opacity:0.95, interactive:false})
-    .bindTooltip(r0(yd(distM(st, plan.aim))) + ' yd', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
+    .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
   if (!aimMarker) drawPlan();
 }
 function renderPlanInfo(){
@@ -1622,7 +1736,7 @@ function openOffline(){
       bt.onclick = function(){
         var a = S.offlineAreas[+bt.dataset.i];
         if (bt.dataset.a === 'view'){
-          follow = false; closeSheet(true); map.fitBounds([[a.b.s, a.b.w], [a.b.n, a.b.e]]);
+          follow = false; closeSheet(true); map.fitBounds([[a.b.s, a.b.w], [a.b.n, a.b.e]], {padding:fitPadding()});
           var want = a.src === 'mapbox' && S.settings.mapboxToken ? 'mapbox' : 'usgs';
           if (S.settings.basemap !== want){ S.settings.basemap = want; save(); setBase(); }
           return;
@@ -1712,6 +1826,7 @@ function openGuide(){
       '<li><b>Took a drop or re-teed?</b> The shot before it now measures to your drop, not to where the ball finished. Tap that shot\'s pin and choose <i>Exclude from club stats</i>.</li>' +
       '<li><b>Tap the flag</b> to edit feet to pin, putts, or reopen a hole.</li>' +
       '<li><b>Tap the hole number</b> to renumber it, for example when you start on 10. Use ' + k('‹') + ' ' + k('›') + ' to move between holes.</li>' +
+      '<li><b>Turn the map</b> with the ' + k('N') + ' button on the right. It swings the hole so your shot plays up the screen, which suits a phone held upright. Tap it again for north up. While the map is turned, drag to pan and tap the map to move your target; dragging markers needs north up, and the app sets that for you.</li>' +
       '<li>' + k('☰') + ' <i>Club distances</i> shows your averages, medians and spread, plus aim results for planned shots. <i>Export</i> and <i>Backup</i> are in the same menu.</li>' +
       '<li>The map button cycles map types, and ' + k('◎') + ' re-centers on you.</li>' +
     '</ul>' +
@@ -1759,6 +1874,7 @@ $('#holeLabel').onclick = function(){
   var v = prompt('Hole number', h.n); if (v === null) return;
   var n = parseInt(v, 10); if (n >= 1 && n <= 36){ h.n = n; save(); renderHole(false); } else toast('Enter a hole number from 1 to 36.');
 };
+$('#rotBtn').onclick = function(){ setRotation(rotMode === 'north' ? 'auto' : 'north'); };
 $('#centerBtn').onclick = function(){ follow = true; if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); else toast('Waiting for GPS'); };
 $('#layerBtn').onclick = function(){
   var st = S.settings, order = [];
