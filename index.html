@@ -22,7 +22,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 #mapWrap{position:fixed;top:0;left:0;right:0;bottom:200px;overflow:hidden;background:#cfd8cf}
 #map{position:absolute;top:0;left:0;width:100%;height:100%;background:#cfd8cf;transform-origin:50% 50%}
 /* keep pins, flags and labels upright when the map is turned */
-.pin,.flag,.aimx,.aimo,.ptdot,.urot{transform:rotate(var(--unrot,0deg))}
+.pin,.flag,.gflag,.aimx,.aimo,.ptdot,.urot{transform:rotate(var(--unrot,0deg))}
 #rotBtn{font-size:15px;font-weight:900;letter-spacing:.5px}
 #rotBtn.on{background:var(--g2);color:#fff}
 #top{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;display:flex;align-items:center;gap:8px;z-index:1000;pointer-events:none}
@@ -144,6 +144,12 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
 .flag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid #d32f2f;color:#d32f2f;font-weight:900;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.gflag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid var(--g2);color:var(--g2);font-weight:900;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.gflag.set{background:var(--g2);color:#fff}
+#tgtBar{position:fixed;left:8px;right:8px;z-index:2400;background:#111;color:#fff;border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 14px rgba(0,0,0,.4)}
+#tgtBar .t{flex:1;font-size:13px;font-weight:700;line-height:1.25}
+#tgtBar button{border:0;border-radius:10px;padding:9px 12px;font-weight:800;font-size:14px}
+#tgtSave{background:var(--g);color:#fff}#tgtCancel{background:#333;color:#fff}
 .leaflet-tooltip.dtip{background:rgba(17,17,17,.85);color:#fff;border:0;font-weight:800;font-size:13px;padding:3px 7px;border-radius:8px;box-shadow:none}
 .leaflet-tooltip.dtip:before{display:none}
 #fatal{position:fixed;inset:0;z-index:5000;background:#fff;padding:24px;font-size:17px;line-height:1.5}
@@ -168,8 +174,10 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
   <button id="centerBtn" class="ib" aria-label="Center on me" title="Center on me">&#9678;</button>
 </div>
 
+<div id="tgtBar" hidden><div class="t" id="tgtText"></div><button id="tgtCancel">Cancel</button><button id="tgtSave">Save</button></div>
+
 <section id="panel">
-  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="greenBtn" class="link" hidden>On the green &#9873;</button></div>
+  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green &#9971;</button><button id="greenBtn" class="link" hidden>On the green &#9873;</button></div>
   <div id="planBox" hidden>
     <div class="planHead">
       <div id="planNum" class="pnum">— yd</div>
@@ -282,12 +290,13 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.4.1', SCHEMA = 3;
-function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[]}; }
+var APP_VERSION = '1.5.0', SCHEMA = 4;
+function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
   if (!j || j.v !== 1) return d;
   j.settings = Object.assign(d.settings, j.settings || {}); j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || [];
+  j.courses = j.courses || []; // v1.5: greens you place yourself, kept per course and reused every round
   if (!('playingId' in j)) j.playingId = null;
   if ((j.schema || 1) < 3) j.settings.wake = false; // v1.1: the phone can sleep between shots by default
   j.schema = SCHEMA;
@@ -501,7 +510,7 @@ function onPos(p, requested){
   var ll = [fix.lat, fix.lng];
   youDot.setLatLng(ll); accCircle.setLatLng(ll).setRadius(fix.acc);
   if (!map.hasLayer(youDot)){ accCircle.addTo(map); youDot.addTo(map); }
-  if (firstFix){ firstFix = false; map.setView(ll, 18); }
+  if (firstFix){ firstFix = false; if (!(greenFor(curHole()) && fitHole())) map.setView(ll, 18); }
   else if (follow){ map.panTo(ll, {animate:true}); }
 
   var r = active();
@@ -514,7 +523,7 @@ function onPos(p, requested){
       trailLine.addLatLng(ll); trailDirty = true;
     }
   }
-  gpsPill(); updateLive(); maybeAutoPoint(); updateAutoBearing();
+  gpsPill(); updateLive(); maybeAutoPoint(); updateAutoBearing(); maybeAutoFit();
   if (plan && !aimDragging){ redrawShapeOnly(); renderPlanInfo(); }
 }
 function onErr(e){
@@ -626,16 +635,23 @@ function renderStatus(){
   var main = $('#stMain'), sub = $('#stSub'); if (!main) return;
   var h = curHole(), open = openShot(h), ls = lockState();
   var gps = !fix ? 'waiting for GPS' : (Date.now() - fix.t > STALE_FIX_MS ? 'GPS ' + Math.round((Date.now() - fix.t) / 1000) + ' s old' : (ls.locked ? 'locked ±' + r0(yd(ls.pos.acc)) + ' yd' : 'getting a fresh fix'));
+  var toG = (h && fix) ? toGreenYd({lat:fix.lat, lng:fix.lng}, h) : null;
+  var gTxt = toG == null ? '' : ' · ' + r0(toG) + ' yd to green';
+  $('#tgtBtn').hidden = !(h && !greenFor(h) && !placing);
   $('#greenBtn').hidden = true;
   if (!active() || !h){ main.textContent = 'Ready to play'; sub.textContent = 'PLAN your tee shot, or RECORD to mark your ball · ' + gps; return; }
   $('#greenBtn').hidden = true;
   if (h.green){ main.textContent = 'Hole ' + h.n + ' finished'; sub.textContent = (h.shots.length) + ' shots · tap RECORD or PLAN to start the next hole · ' + gps; return; }
   $('#greenBtn').hidden = true;
-  if (!open){ main.textContent = 'Hole ' + h.n + ' · no ball marked'; sub.textContent = 'PLAN your shot, or RECORD to mark your ball · ' + gps; return; }
+  if (!open){
+    main.textContent = toG == null ? 'Hole ' + h.n + ' · no ball marked' : r0(toG) + ' yd to the green';
+    sub.textContent = (toG == null ? '' : 'Hole ' + h.n + ' · no ball marked · ') + 'PLAN your shot, or RECORD to mark your ball · ' + gps; return;
+  }
   $('#greenBtn').hidden = false;
+  $('#tgtBtn').hidden = true; // one action at a time in the bar: finishing the hole wins
   var d = fix ? r0(yd(distM(open, fix))) : null;
   main.textContent = (d == null ? '—' : d + ' yd') + ' from your ball';
-  sub.textContent = 'Shot ' + h.shots.length + (open.club ? ' · ' + open.club : ' · club not set') + (open.plan ? ' · aimed ' + r0(yd(distM(open, open.plan))) + ' yd' : '') + ' · ' + gps;
+  sub.textContent = 'Shot ' + h.shots.length + (open.club ? ' · ' + open.club : ' · club not set') + (open.plan ? ' · aimed ' + r0(yd(distM(open, open.plan))) + ' yd' : '') + gTxt + ' · ' + gps;
 }
 
 /* ---------- wake lock ---------- */
@@ -720,11 +736,14 @@ function applyRotation(light){
   document.documentElement.style.setProperty('--unrot', (-cssAngle()).toFixed(1) + 'deg');
   if (map.dragging){ if (bearing) map.dragging.disable(); else map.dragging.enable(); }
   if (aimMarker && aimMarker.dragging){ if (bearing) aimMarker.dragging.disable(); else aimMarker.dragging.enable(); }
+  if (placing && placing.marker && placing.marker.dragging){ if (bearing) placing.marker.dragging.disable(); else placing.marker.dragging.enable(); }
   $('#rotBtn').textContent = rotMode === 'north' ? 'N' : (bearing ? r0(bearing) + '°' : ROT_LABEL[rotMode]);
   $('#rotBtn').classList.toggle('on', rotMode !== 'north');
   map.invalidateSize();
 }
 function autoBearing(){
+  var g = greenFor(curHole()); // the hole's own line: you to the green
+  if (g && fix && distM(fix, g) > 20) return bearingDeg({lat:fix.lat, lng:fix.lng}, g);
   if (plan && fix) return bearingDeg({lat:fix.lat, lng:fix.lng}, plan.aim);
   var h = curHole(), open = openShot(h);
   if (open && fix && distM(open, fix) > 15) return bearingDeg(open, {lat:fix.lat, lng:fix.lng});
@@ -764,21 +783,25 @@ function setRotation(mode){
   toast('Map turned so your shot plays up the screen');
 }
 function cycleRotation(){ setRotation(rotMode === 'north' ? 'auto' : (rotMode === 'auto' ? 'free' : 'north')); }
-window.__mousePos = function(x, y){ var pt = L.DomEvent.getMousePosition({clientX:x, clientY:y}, $('#map')); return {x:pt.x, y:pt.y}; };
+window.__mousePos = function(x, y){ var pt = map.mouseEventToContainerPoint({clientX:x, clientY:y}); return {x:pt.x, y:pt.y}; };
 window.__rotState = function(){ return {mode:rotMode, bearing:bearing, css:$('#map').style.transform, size:[$('#map').style.width, $('#map').style.height]}; };
 window.__setRotation = setRotation;
 window.__cycleRotation = cycleRotation;
 
-/* taps and clicks: undo the rotation so Leaflet gets the right point */
+/* Taps and clicks: undo the rotation so Leaflet gets the right point.
+   Every map DOM event goes through mouseEventToContainerPoint, so that is the one place to correct.
+   (Patching L.DomEvent.getMousePosition does not reach it: Leaflet calls its own module-scope copy,
+   so a rotated map used to put your tap somewhere else entirely.) */
 (function(){
-  var orig = L.DomEvent.getMousePosition;
-  L.DomEvent.getMousePosition = function(e, container){
-    if (bearing && container === $('#map')){
-      var r = container.getBoundingClientRect();
+  var orig = L.Map.prototype.mouseEventToContainerPoint;
+  L.Map.prototype.mouseEventToContainerPoint = function(e){
+    var c = this._container;
+    if (bearing && c === $('#map')){
+      var r = c.getBoundingClientRect();
       var p = rotIn(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
-      return new L.Point(p.x + container.offsetWidth / 2, p.y + container.offsetHeight / 2);
+      return new L.Point(p.x + c.offsetWidth / 2, p.y + c.offsetHeight / 2);
     }
-    return orig.call(this, e, container);
+    return orig.call(this, e);
   };
 })();
 
@@ -833,11 +856,140 @@ window.__cycleRotation = cycleRotation;
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', attach); else attach();
 })();
 
+/* ---------- the green, placed by hand ----------
+   A green belongs to the course, not to one round: place it once and every later round on the same
+   course reuses it. A round finds its course by its name; a round you did not name is matched to the
+   nearest course you have already placed a green on. The name wins, because two courses at one resort
+   can sit a few hundred yards apart and the wrong greens would mean wrong yardages all day. */
+var COURSE_MATCH_M = 1200;
+function findCourse(id){ for (var i = 0; i < S.courses.length; i++) if (S.courses[i].id === id) return S.courses[i]; return null; }
+function nearestCourse(pt, maxM){
+  var best = null, bd = maxM;
+  S.courses.forEach(function(c){
+    Object.keys(c.greens || {}).forEach(function(k){
+      var d = distM(pt, c.greens[k]); if (d < bd){ bd = d; best = c; }
+    });
+  });
+  return best;
+}
+function courseFor(create){
+  var r = active(); if (!r) return null;
+  var c = r.courseId ? findCourse(r.courseId) : null;
+  if (!c){
+    var name = (r.course || '').trim().toLowerCase();
+    if (name) c = S.courses.filter(function(x){ return (x.name || '').trim().toLowerCase() === name; })[0] || null;
+  }
+  if (!c && !(r.course || '').trim() && fix) c = nearestCourse(fix, COURSE_MATCH_M);
+  if (!c && create){ c = {id:uid(), name:(r.course || '').trim() || 'Course', t:Date.now(), greens:{}}; S.courses.push(c); }
+  if (c && r.courseId !== c.id) r.courseId = c.id;
+  return c;
+}
+function greenFor(h){
+  if (!h) return null;
+  var c = courseFor(false);
+  return (c && c.greens && c.greens[h.n]) || null;
+}
+/* yards from a point to this hole's green, or null when there is no green to measure to */
+function toGreenYd(from, h){
+  var g = greenFor(h || curHole());
+  return (g && from) ? yd(distM(from, g)) : null;
+}
+window.__greenFor = greenFor; window.__courseFor = courseFor;
+
+var greenIcon = L.divIcon({className:'', html:'<div class="gflag set">&#9971;</div>', iconSize:[30,30], iconAnchor:[15,15]});
+var greenPickIcon = L.divIcon({className:'', html:'<div class="gflag">&#9971;</div>', iconSize:[30,30], iconAnchor:[15,15]});
+
+/* Placing: tap the centre of the green, drag to nudge, Save. */
+var placing = null;
+function startPlaceGreen(){
+  var h = curHole();
+  if (!h){ toast('Start a round first'); return; }
+  if (plan) endPlan(true);
+  var g = greenFor(h);
+  placing = {n:h.n, pt:g ? {lat:g.lat, lng:g.lng} : null, marker:null};
+  if (placing.pt) placeGreenMarker(placing.pt);
+  $('#tgtBar').hidden = false;
+  $('#tgtText').textContent = 'Hole ' + h.n + ': tap the centre of the green, then Save. Drag the marker to nudge it.';
+  renderHole(false); layout();
+}
+function placeGreenMarker(ll){
+  if (!placing) return;
+  placing.pt = {lat:ll.lat, lng:ll.lng};
+  if (placing.marker){ placing.marker.setLatLng(ll); }
+  else {
+    placing.marker = L.marker([ll.lat, ll.lng], {icon:greenPickIcon, draggable:!bearing, zIndexOffset:2500}).addTo(map);
+    placing.marker.on('drag', function(e){ var p = e.target.getLatLng(); placing.pt = {lat:p.lat, lng:p.lng}; });
+    attachRotDrag(placing.marker, {move:function(p){ placing.pt = {lat:p.lat, lng:p.lng}; }});
+  }
+}
+function endPlaceGreen(){
+  if (placing && placing.marker) map.removeLayer(placing.marker);
+  placing = null;
+  $('#tgtBar').hidden = true;
+  renderHole(false); layout();
+}
+function saveGreen(){
+  if (!placing) return;
+  if (!placing.pt){ toast('Tap the centre of the green first'); return; }
+  var c = courseFor(true);
+  if (!c){ toast('Start a round first'); return; }
+  c.greens[placing.n] = {lat:+placing.pt.lat.toFixed(7), lng:+placing.pt.lng.toFixed(7), t:Date.now()};
+  var n = placing.n;
+  save(); endPlaceGreen(); fitHole();
+  toast('Green saved for hole ' + n + ' at ' + esc(c.name) + '. Every round here will use it.', 4000);
+}
+function openCourseGreen(h){
+  var c = courseFor(false), g = greenFor(h);
+  var el = openSheet(
+    '<h3>Green &middot; Hole ' + h.n + '</h3>' +
+    '<div class="sub">' + (g ? 'Saved for ' + esc(c ? c.name : 'this course') + ' and reused every round here. Yardages are measured to this point.'
+                             : 'No green placed for this hole yet.') + '</div>' +
+    '<div class="stack">' +
+    '<button class="btn" id="gMove">' + (g ? 'Move it' : 'Place it') + '</button>' +
+    (g ? '<button class="btn sec" id="gClear">Remove it</button>' : '') +
+    '<button class="btn ghost" id="close">Close</button></div>');
+  el.querySelector('#gMove').onclick = function(){ closeSheet(true); startPlaceGreen(); };
+  if (g) el.querySelector('#gClear').onclick = function(){
+    if (c && c.greens) delete c.greens[h.n];
+    save(); closeSheet(true); renderHole(false); toast('Green removed from hole ' + h.n);
+  };
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+
+/* Scale: fit you, the green and any aim target on screen. Never while you are following yourself
+   with the recentre button, never within 10 s of touching the map, and only once the distance has
+   really changed - otherwise the map would re-zoom under your thumb on every GPS tick. */
+var autoFitAt = 0, autoFitD = null, mapTouchedAt = 0;
+function fitHole(){
+  var h = curHole(), g = greenFor(h), pts = [];
+  if (fix) pts.push([fix.lat, fix.lng]);
+  if (g) pts.push([g.lat, g.lng]);
+  if (plan) pts.push([plan.aim.lat, plan.aim.lng]);
+  if (pts.length < 2) return false;
+  follow = false;
+  map.fitBounds(pts, {padding:fitPadding(), maxZoom:19});
+  autoFitD = (g && fix) ? distM(fix, g) : null; autoFitAt = Date.now();
+  updateAutoBearing(true);
+  return true;
+}
+function maybeAutoFit(){
+  if (follow || placing || aimDragging || !fix || !booted) return;
+  var g = greenFor(curHole()); if (!g) return;
+  if (Date.now() - mapTouchedAt < 10000 || Date.now() - autoFitAt < 8000) return;
+  var d = distM(fix, g);
+  if (autoFitD != null && Math.abs(d - autoFitD) / Math.max(1, autoFitD) < 0.15) return;
+  fitHole();
+}
+window.__fitHole = fitHole;
+window.__mapView = function(){ var c = map.getCenter(); return {zoom:map.getZoom(), lat:c.lat, lng:c.lng}; }; // exposed for testing
+
 /* ---------- rendering ---------- */
 function layout(){
   var ph = $('#panel').offsetHeight;
   $('#mapWrap').style.bottom = Math.max(0, ph - 18) + 'px';
-  $('#fabs').style.bottom = (ph + 26) + 'px';
+  var tb = $('#tgtBar'), tbh = tb.hidden ? 0 : tb.offsetHeight + 10;
+  tb.style.bottom = (ph + 10) + 'px';
+  $('#fabs').style.bottom = (ph + 26 + tbh) + 'px';
   applyRotation();
 }
 if (window.ResizeObserver) new ResizeObserver(layout).observe($('#panel'));
@@ -884,11 +1036,19 @@ function renderHole(fit){
       gm.on('click', function(){ openGreenEdit(h); });
       markers.green = gm;
     }
+    var cg = greenFor(h);
+    if (cg && !(placing && placing.n === h.n)){
+      var cm = L.marker([cg.lat, cg.lng], {icon:greenIcon, zIndexOffset:900}).addTo(holeLayer);
+      cm.bindTooltip('<span class="urot">' + greenLabel() + '</span>', {permanent:true, direction:'top', offset:[0,-15], className:'dtip'});
+      cm.on('click', function(){ openCourseGreen(h); });
+      markers.cgreen = cm;
+    }
     if (fit){
       var pts = h.shots.map(function(s){ return [s.lat, s.lng]; });
       if (h.green) pts.push([h.green.lat, h.green.lng]);
-      if (fix && !h.green) pts.push([fix.lat, fix.lng]);
-      if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); }
+      if (cg) pts.push([cg.lat, cg.lng]);
+      if (fix && (cg || !h.green)) pts.push([fix.lat, fix.lng]);
+      if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); autoFitAt = Date.now(); autoFitD = (cg && fix) ? distM(fix, cg) : null; }
       else if (fix){ follow = true; map.setView([fix.lat, fix.lng], 18); }
     }
   }
@@ -896,10 +1056,15 @@ function renderHole(fit){
 }
 
 function openShot(h){ return (h && h.shots.length && !h.green) ? h.shots[h.shots.length - 1] : null; }
+function greenLabel(){
+  var d = fix ? toGreenYd({lat:fix.lat, lng:fix.lng}) : null;
+  return d == null ? 'green' : r0(d) + ' yd';
+}
 function updateLive(){
   var h = curHole(), open = openShot(h);
   if (open && fix) liveLine.setLatLngs([[open.lat, open.lng], [fix.lat, fix.lng]]);
   else liveLine.setLatLngs([]);
+  if (markers.cgreen && markers.cgreen.setTooltipContent) markers.cgreen.setTooltipContent('<span class="urot">' + greenLabel() + '</span>');
   renderStatus();
 }
 
@@ -1297,6 +1462,7 @@ window.__computeAimStats = computeAimStats;
 var plan = null;           // {aim:{lat,lng}, club, pat:{shape,L,R,S,G}}
 var aimDragging = false, planKey = null;
 var planLayer = L.layerGroup().addTo(map), aimMarker = null;
+window.__plan = function(){ return plan; }; // exposed for testing
 var aimIcon = L.divIcon({className:'', html:'<div class="aimx"></div>', iconSize:[34,34], iconAnchor:[17,17]});
 var aimDoneIcon = L.divIcon({className:'', html:'<div class="aimo"></div>', iconSize:[16,16], iconAnchor:[8,8]});
 
@@ -1333,7 +1499,7 @@ function endPlan(silent){
   if (!silent) updateLive();
 }
 function setAim(ll){ if (!plan) return; plan.aim = {lat:ll.lat, lng:ll.lng}; drawPlan(); renderPlanInfo(); }
-map.on('click', function(e){ if (plan) setAim(e.latlng); });
+map.on('click', function(e){ if (placing){ placeGreenMarker(e.latlng); return; } if (plan) setAim(e.latlng); });
 
 function drawPlan(){
   if (!plan){ planLayer.clearLayers(); aimMarker = null; return; }
@@ -1343,44 +1509,57 @@ function drawPlan(){
   if (poly.length) L.polygon(poly, {color:'#ff9800', weight:2, fillColor:'#ff9800', fillOpacity:0.18, interactive:false}).addTo(planLayer);
   L.polyline([[st.lat, st.lng], [plan.aim.lat, plan.aim.lng]], {color:'#ffffff', weight:3, opacity:0.95, interactive:false})
     .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
+  planGreenLine();
   aimMarker = L.marker([plan.aim.lat, plan.aim.lng], {icon:aimIcon, draggable:!bearing, zIndexOffset:2000}).addTo(planLayer);
   aimMarker.on('dragstart', function(){ aimDragging = true; follow = false; });
   aimMarker.on('drag', function(e){ var ll = e.target.getLatLng(); plan.aim = {lat:ll.lat, lng:ll.lng}; redrawShapeOnly(); renderPlanInfo(); });
   aimMarker.on('dragend', function(){ aimDragging = false; drawPlan(); });
-  attachAimDrag(aimMarker);
+  attachRotDrag(aimMarker, {
+    start:function(){ aimDragging = true; },
+    move:function(ll){ if (!plan) return; plan.aim = {lat:ll.lat, lng:ll.lng}; redrawShapeOnly(); renderPlanInfo(); },
+    end:function(){ aimDragging = false; if (plan) drawPlan(); }
+  });
 }
-/* Moving the target while the map is turned. Leaflet's own marker drag follows the raw screen
+/* Moving a marker while the map is turned. Leaflet's own marker drag follows the raw screen
    delta, which pulls the wrong way once the map element is rotated, so the pointer moves are
    turned back into the map's own frame here. Facing north, Leaflet's drag still does the work. */
-function attachAimDrag(m){
+function attachRotDrag(m, h){
   var el = m.getElement && m.getElement();
   if (!el) return;
+  h = h || {};
   el.style.touchAction = 'none';
   var drag = null;
   function end(e){
     if (!drag || e.pointerId !== drag.id) return;
-    drag = null; aimDragging = false;
-    if (plan) drawPlan();
+    drag = null;
+    if (h.end) h.end();
   }
   el.addEventListener('pointerdown', function(e){
-    if (!plan || !bearing) return;  // facing north: Leaflet's marker drag is live, leave it alone
-    e.stopPropagation();            // keep the one-finger pan out of this gesture
-    drag = {id:e.pointerId, x:e.clientX, y:e.clientY, pt:map.latLngToContainerPoint(plan.aim)};
-    aimDragging = true; follow = false;
+    if (!bearing) return;  // facing north: Leaflet's marker drag is live, leave it alone
+    e.stopPropagation();   // keep the one-finger pan out of this gesture
+    drag = {id:e.pointerId, x:e.clientX, y:e.clientY, pt:map.latLngToContainerPoint(m.getLatLng())};
+    follow = false;
+    if (h.start) h.start();
     try { el.setPointerCapture(e.pointerId); } catch(err){}
   });
   el.addEventListener('pointermove', function(e){
-    if (!drag || e.pointerId !== drag.id || !plan) return;
+    if (!drag || e.pointerId !== drag.id) return;
     e.stopPropagation();
     var v = rotIn(e.clientX - drag.x, e.clientY - drag.y);
     var ll = map.containerPointToLatLng([drag.pt.x + v.x, drag.pt.y + v.y]);
-    plan.aim = {lat:ll.lat, lng:ll.lng};
-    m.setLatLng(ll); redrawShapeOnly(); renderPlanInfo();
+    m.setLatLng(ll);
+    if (h.move) h.move(ll);
   });
   el.addEventListener('pointerup', end);
   el.addEventListener('pointercancel', end);
-  // a tap on the target itself must not re-aim to wherever the finger landed
+  // a tap on the marker itself must not fall through to the map underneath
   el.addEventListener('click', function(e){ L.DomEvent.stop(e); });
+}
+/* the leg the planned shot leaves you: aim to green */
+function planGreenLine(){
+  var g = plan ? greenFor(curHole()) : null; if (!g) return;
+  L.polyline([[plan.aim.lat, plan.aim.lng], [g.lat, g.lng]], {color:'#ffffff', weight:2, dashArray:'5 6', opacity:0.9, interactive:false})
+    .bindTooltip('<span class="urot">' + r0(yd(distM(plan.aim, g))) + ' yd to green</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
 }
 function redrawShapeOnly(){
   // cheap redraw while dragging: rebuild everything except the marker being dragged
@@ -1390,6 +1569,7 @@ function redrawShapeOnly(){
   if (poly.length) L.polygon(poly, {color:'#ff9800', weight:2, fillColor:'#ff9800', fillOpacity:0.18, interactive:false}).addTo(planLayer);
   L.polyline([[st.lat, st.lng], [plan.aim.lat, plan.aim.lng]], {color:'#ffffff', weight:3, opacity:0.95, interactive:false})
     .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
+  planGreenLine();
   if (!aimMarker) drawPlan();
 }
 function renderPlanInfo(){
@@ -1398,7 +1578,10 @@ function renderPlanInfo(){
   $('#planNum').textContent = (d == null ? '—' : r0(d)) + ' yd to aim';
   var sug = d != null ? suggestClub(d) : null, sub = $('#planSub');
   if (fix && Date.now() - fix.t > STALE_FIX_MS) sub.textContent = 'GPS is ' + Math.round((Date.now() - fix.t) / 1000) + ' s old';
-  else sub.textContent = patShort(plan.pat) + (sug ? ' · your ' + sug.club + ' median ' + r0(sug.median) + ' yd' : '');
+  else {
+    var lv = toGreenYd(plan.aim);
+    sub.textContent = (lv == null ? '' : 'leaves ' + r0(lv) + ' yd to the green · ') + patShort(plan.pat) + (sug ? ' · your ' + sug.club + ' median ' + r0(sug.median) + ' yd' : '');
+  }
   Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){ b.classList.toggle('sug', !!sug && b.textContent === sug.club); });
 }
 function renderPlanBox(keepOpen){
@@ -1683,6 +1866,7 @@ function openMenu(){
     '<button id="mGuide">About &amp; how to use</button>' +
     '<button id="mNew">New round</button>' +
     '<button id="mCourse"' + (r ? '' : ' hidden') + '>Rename course</button>' +
+    '<button id="mGreen"' + (r && curHole() ? '' : ' hidden') + '>Green for this hole</button>' +
     '<button id="mRounds">Rounds</button>' +
     '<button id="mReview">Review this round</button>' +
     '<button id="mStats">Club distances</button>' +
@@ -1701,8 +1885,12 @@ function openMenu(){
   };
   el.querySelector('#mCourse').onclick = function(){
     var name = prompt('Course name', r.course || ''); if (name === null) return;
-    r.course = name.trim(); save(); closeSheet(true);
+    r.course = name.trim();
+    var c = r.courseId ? findCourse(r.courseId) : null; // keep the saved greens under the new name
+    if (c && r.course) c.name = r.course;
+    save(); closeSheet(true);
   };
+  el.querySelector('#mGreen').onclick = function(){ var h = curHole(); closeSheet(true); if (h) openCourseGreen(h); };
   el.querySelector('#mRounds').onclick = function(){ closeSheet(true); openRounds(); };
   el.querySelector('#mStats').onclick = function(){ closeSheet(true); openStats(); };
   el.querySelector('#mReview').onclick = function(){ closeSheet(true); openReview(); };
@@ -1999,6 +2187,11 @@ $('#nextHole').onclick = function(){
 };
 $('#holeLabel').onclick = openHolePicker;
 $('#rotBtn').onclick = cycleRotation;
+$('#tgtBtn').onclick = startPlaceGreen;
+$('#tgtSave').onclick = saveGreen;
+$('#tgtCancel').onclick = endPlaceGreen;
+// any finger on the map means hands off the zoom for a while
+$('#mapWrap').addEventListener('pointerdown', function(){ mapTouchedAt = Date.now(); }, {passive:true, capture:true});
 $('#centerBtn').onclick = function(){ follow = true; if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); else toast('Waiting for GPS'); };
 $('#layerBtn').onclick = function(){
   var st = S.settings, order = [];
