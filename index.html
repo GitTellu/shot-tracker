@@ -333,7 +333,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.10.0', SCHEMA = 5;
+var APP_VERSION = '1.11.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -2103,6 +2103,55 @@ function roundStats(r){
   if (st.allPar && st.par) st.toPar = st.strokes - st.par;
   return st;
 }
+/* Everything the extra views measure. Scoring stats come off the hole cards rather than the GPS,
+   so they hold up even on a hole where a shot went unrecorded: strokes before the first putt is
+   score minus putts, and that is what says whether the green was hit in regulation. */
+function roundNumbers(r){
+  var N = {drives:[], approaches:[], gir:0, girHoles:0, scrTry:0, scrWon:0, sandTry:0, sandWon:0,
+           putts:[], one:0, three:0, puttsGir:[], made:[], miss:{Short:0, Long:0, Left:0, Right:0},
+           reads:0, readRight:0, holes:0};
+  r.holes.filter(holePlayed).forEach(function(h){
+    var par = courseParFor(r, h), sc = holeScore(h), c = cardOf(h), pc = puttCount(h), g = courseGreenFor(r, h);
+    N.holes++;
+    var first = h.shots[0];
+    if (first && first.lie === 'Tee' && par !== 3 && !first.excluded){
+      var d = shotDistYd(h, 0);
+      if (d != null && d > 60 && d < 450) N.drives.push({yd:d, n:h.n, club:first.club});
+    }
+    if (g && h.shots.length){
+      var last = h.shots[h.shots.length - 1];
+      var from = yd(distM(last, g));
+      if (from > 10 && from < 280) N.approaches.push({from:from, n:h.n, feet:(h.green && h.green.feet != null) ? h.green.feet : null});
+    }
+    if (par && sc != null){
+      N.girHoles++;
+      var toGreen = sc - pc;                 // strokes taken before the first putt
+      if (toGreen <= par - 2){ N.gir++; N.puttsGir.push(pc); }
+      else {
+        N.scrTry++; if (sc <= par) N.scrWon++;
+        if (c && c.bunker.gs){ N.sandTry++; if (sc <= par) N.sandWon++; }
+      }
+    }
+    N.putts.push(pc);
+    if (pc === 1) N.one++;
+    if (pc >= 3) N.three++;
+    if (c) c.putts.forEach(function(pt){
+      if (pt.out === 'In'){ if (pt.ft != null) N.made.push({ft:pt.ft, n:h.n}); }
+      else if (pt.out && N.miss.hasOwnProperty(pt.out)) N.miss[pt.out]++;
+      if (pt.read && pt.act){ N.reads++; if (pt.read === pt.act) N.readRight++; }
+    });
+  });
+  var sortNum = function(a, b){ return a - b; };
+  N.driveYds = N.drives.map(function(x){ return x.yd; }).sort(sortNum);
+  N.appYds = N.approaches.map(function(x){ return x.from; }).sort(sortNum);
+  N.puttTotal = N.putts.reduce(function(t, v){ return t + v; }, 0);
+  N.longestMade = N.made.length ? N.made.reduce(function(a, b){ return b.ft > a.ft ? b : a; }) : null;
+  N.prox = N.approaches.filter(function(x){ return x.feet != null; });
+  return N;
+}
+function med(a){ return a.length ? a[Math.floor((a.length - 1) / 2)] : null; }
+window.__roundNumbers = roundNumbers;
+
 function markFor(d){ return d == null ? '' : (d <= -2 ? 'eagle' : d === -1 ? 'birdie' : d === 0 ? 'par' : d === 1 ? 'bogey' : 'dbl'); }
 function svgMark(cx, cy, kind){
   var g = CARD.under, b = CARD.over;
@@ -2213,10 +2262,168 @@ function roundCardSVG(r){
 }
 window.__roundCardSVG = roundCardSVG; window.__roundStats = roundStats;
 
+/* shared furniture for the other two views */
+function cardShell(title, st, body){
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + CARD_W + ' ' + CARD_H + '" width="' + CARD_W + '" height="' + CARD_H + '" role="img" aria-label="' + esc(title) + '">' +
+    '<defs><linearGradient id="bg" x1="0" y1="0" x2="0.35" y2="1">' +
+      '<stop offset="0" stop-color="' + CARD.bg2 + '"/><stop offset="1" stop-color="' + CARD.bg + '"/></linearGradient></defs>' +
+    '<style>text{font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;fill:' + CARD.ink + '}' +
+      '.eyebrow{font-size:25px;font-weight:700;letter-spacing:5px;fill:' + CARD.mut + '}' +
+      '.sec{font-size:25px;font-weight:800;letter-spacing:3.4px;fill:' + CARD.under + '}' +
+      '.big{font-size:74px;font-weight:800}.big2{font-size:52px;font-weight:800}' +
+      '.lbl{font-size:21px;font-weight:700;letter-spacing:1.8px;fill:' + CARD.mut + '}' +
+      '.note{font-size:22px;font-weight:600;fill:' + CARD.mut + '}' +
+      '.tick{font-size:19px;font-weight:700;fill:' + CARD.mut + '}' +
+      '.celln{font-size:22px;font-weight:800}.cells{font-size:20px;font-weight:800;fill:' + CARD.under + '}' +
+      '.celly{font-size:17px;font-weight:600;fill:' + CARD.mut + '}' +
+      '.mark{font-size:24px;font-weight:800;letter-spacing:4px;fill:' + CARD.mut + '}</style>' +
+    '<rect width="' + CARD_W + '" height="' + CARD_H + '" fill="url(#bg)"/>' +
+    '<text x="60" y="88" class="eyebrow">' + esc(title) + '</text>' +
+    '<text x="1020" y="88" text-anchor="end" class="eyebrow">' + esc(String(st.strokes || '')) + (st.toPar == null ? '' : '  ' + (st.toPar > 0 ? '+' : '') + st.toPar) + '</text>' +
+    '<line x1="60" y1="118" x2="1020" y2="118" stroke="' + CARD.line + '" stroke-width="1.5"/>' +
+    body +
+    '<text x="540" y="1320" text-anchor="middle" class="mark">SHOT TRACKER</text></svg>';
+}
+/* one row of measurements on a yardage line: every shot as a dot, the middle one called out */
+function dotStrip(vals, y, x0, w, accent, unit){
+  if (!vals.length) return '<text x="' + (x0 + w / 2) + '" y="' + y + '" text-anchor="middle" class="note">nothing measured yet</text>';
+  var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+  var pad = Math.max(8, (hi - lo) * 0.12); lo = Math.max(0, lo - pad); hi = hi + pad;
+  var at = function(v){ return x0 + ((v - lo) / ((hi - lo) || 1)) * w; };
+  var m = med(vals);
+  var out = '<line x1="' + x0 + '" y1="' + y + '" x2="' + (x0 + w) + '" y2="' + y + '" stroke="' + CARD.line + '" stroke-width="2"/>';
+  vals.forEach(function(v){ out += '<circle cx="' + at(v).toFixed(1) + '" cy="' + y + '" r="9" fill="' + accent + '" fill-opacity="0.55"/>'; });
+  out += '<line x1="' + at(m).toFixed(1) + '" y1="' + (y - 28) + '" x2="' + at(m).toFixed(1) + '" y2="' + (y + 28) + '" stroke="' + CARD.ink + '" stroke-width="3"/>' +
+    '<text x="' + at(m).toFixed(1) + '" y="' + (y - 40) + '" text-anchor="middle" class="tick">' + r0(m) + unit + '</text>' +
+    '<text x="' + x0 + '" y="' + (y + 50) + '" class="tick">' + r0(Math.min.apply(null, vals)) + '</text>' +
+    '<text x="' + (x0 + w) + '" y="' + (y + 50) + '" text-anchor="end" class="tick">' + r0(Math.max.apply(null, vals)) + unit + '</text>';
+  return out;
+}
+function statBlock(x, big, lbl, accent){
+  return '<text x="' + x + '" y="0" class="big2"' + (accent ? ' style="fill:' + accent + '"' : '') + '>' + big + '</text>' +
+         '<text x="' + x + '" y="34" class="lbl">' + lbl + '</text>';
+}
+function numbersCardSVG(r){
+  var st = roundStats(r), N = roundNumbers(r);
+  var pct = function(a, b){ return b ? Math.round(100 * a / b) + '%' : '\u2013'; };
+  var body = '';
+  /* drives */
+  body += '<g transform="translate(0,190)">' +
+    '<text x="60" y="0" class="sec">DRIVES</text>' +
+    '<text x="1020" y="0" text-anchor="end" class="note">' + N.drives.length + ' measured</text>' +
+    dotStrip(N.driveYds, 96, 60, 960, CARD.under, ' yd') +
+    '<g transform="translate(0,200)">' +
+      statBlock(60, N.driveYds.length ? r0(med(N.driveYds)) : '\u2013', 'MEDIAN') +
+      statBlock(360, N.driveYds.length ? r0(N.driveYds[N.driveYds.length - 1]) : '\u2013', 'LONGEST', CARD.under) +
+      statBlock(680, N.driveYds.length ? r0(N.driveYds[N.driveYds.length - 1] - N.driveYds[0]) : '\u2013', 'SPREAD') +
+    '</g></g>';
+  /* approaches */
+  body += '<g transform="translate(0,530)">' +
+    '<line x1="60" y1="-46" x2="1020" y2="-46" stroke="' + CARD.line + '" stroke-width="1.5"/>' +
+    '<text x="60" y="0" class="sec">APPROACHES</text>' +
+    '<text x="1020" y="0" text-anchor="end" class="note">how far out the last full shot was hit from</text>' +
+    dotStrip(N.appYds, 96, 60, 960, CARD.over, ' yd') +
+    '<g transform="translate(0,200)">' +
+      statBlock(60, N.appYds.length ? r0(med(N.appYds)) : '\u2013', 'MEDIAN OUT') +
+      statBlock(360, N.prox.length ? r0(N.prox.reduce(function(t, x){ return t + x.feet; }, 0) / N.prox.length) + ' ft' : '\u2013', 'AVERAGE PROXIMITY', CARD.over) +
+      statBlock(680, String(N.prox.length), 'WITH A DISTANCE LOGGED') +
+    '</g></g>';
+  /* up and down */
+  body += '<g transform="translate(0,870)">' +
+    '<line x1="60" y1="-46" x2="1020" y2="-46" stroke="' + CARD.line + '" stroke-width="1.5"/>' +
+    '<text x="60" y="0" class="sec">UP AND DOWN</text>' +
+    '<g transform="translate(0,84)">' +
+      '<text x="60" y="0" class="big" style="fill:' + CARD.under + '">' + pct(N.scrWon, N.scrTry) + '</text>' +
+      '<text x="60" y="36" class="lbl">SAVED FROM ' + N.scrTry + ' MISSED GREEN' + (N.scrTry === 1 ? '' : 'S') + '</text>' +
+      statBlock(560, pct(N.gir, N.girHoles), 'GREENS HIT') +
+      statBlock(810, N.sandTry ? pct(N.sandWon, N.sandTry) : '\u2013', 'SAND SAVES') +
+    '</g></g>';
+  /* putting */
+  var missTot = N.miss.Short + N.miss.Long + N.miss.Left + N.miss.Right;
+  body += '<g transform="translate(0,1080)">' +
+    '<line x1="60" y1="-46" x2="1020" y2="-46" stroke="' + CARD.line + '" stroke-width="1.5"/>' +
+    '<text x="60" y="0" class="sec">PUTTING</text>' +
+    '<g transform="translate(0,72)">' +
+      statBlock(60, String(N.puttTotal), 'PUTTS') +
+      statBlock(280, String(N.one), 'ONE PUTTS', CARD.under) +
+      statBlock(520, String(N.three), 'THREE PUTTS', N.three ? CARD.over : null) +
+      statBlock(760, N.puttsGir.length ? (N.puttsGir.reduce(function(t, v){ return t + v; }, 0) / N.puttsGir.length).toFixed(2) : '\u2013', 'PER GREEN HIT') +
+    '</g>' +
+    '<text x="60" y="146" class="note">' +
+      (N.longestMade ? 'Longest holed ' + N.longestMade.ft + ' ft on ' + N.longestMade.n : 'No putt distances logged yet') +
+      (missTot ? '   \u00b7   missed ' + N.miss.Short + ' short, ' + N.miss.Long + ' long, ' + N.miss.Left + ' left, ' + N.miss.Right + ' right' : '') +
+    '</text>' +
+    (N.reads ? '<text x="60" y="182" class="note">Read the break right on ' + N.readRight + ' of ' + N.reads + ' putts</text>' : '') +
+    '</g>';
+  return cardShell('THE NUMBERS', st, body);
+}
+window.__numbersCardSVG = numbersCardSVG;
+
+/* Every hole as its own little drawing: the shots turned so the hole plays left to right, which
+   is the shape of how you actually played it rather than where it sits on the earth. */
+function holeTrace(r, h, w, hgt){
+  var g = courseGreenFor(r, h) || greenPos(h);
+  var pts = h.shots.slice();
+  if (g) pts = pts.concat([g]);
+  if (pts.length < 2) return null;
+  var o = pts[0], axis = g || pts[pts.length - 1];
+  var A = toXY(o, axis), ang = Math.atan2(A.y, A.x), c = Math.cos(-ang), sn = Math.sin(-ang);
+  var xy = pts.map(function(p){ var q = toXY(o, p); return {x:q.x * c - q.y * sn, y:q.x * sn + q.y * c}; });
+  var xs = xy.map(function(q){ return q.x; }), ys = xy.map(function(q){ return q.y; });
+  var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+  var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+  var k = Math.min(w / Math.max(x1 - x0, 1), hgt / Math.max(y1 - y0, 1));
+  var ox = (w - (x1 - x0) * k) / 2 - x0 * k, oy = (hgt - (y1 - y0) * k) / 2 + y1 * k;
+  return {p:xy.map(function(q){ return {x:q.x * k + ox, y:oy - q.y * k}; }), hasGreen:!!g, yards:yd(distM(o, axis))};
+}
+function holesCardSVG(r){
+  var st = roundStats(r);
+  var cols = 3, cw = 312, ch = 160, gx = 12, gy = 12, bx = 60, by = 210, body = '';
+  var drawn = 0;
+  r.holes.filter(holePlayed).slice(0, 18).forEach(function(h, i){
+    var cx = bx + (i % cols) * (cw + gx), cy = by + Math.floor(i / cols) * (ch + gy);
+    var sc = holeScore(h), par = courseParFor(r, h);
+    body += '<g transform="translate(' + cx + ',' + cy + ')">' +
+      '<rect width="' + cw + '" height="' + ch + '" rx="14" fill="#FFFFFF" fill-opacity="0.035"/>' +
+      '<text x="14" y="28" class="celln">' + h.n + '</text>' +
+      (sc != null ? '<text x="' + (cw - 14) + '" y="28" text-anchor="end" class="cells">' + sc + (par ? '<tspan class="celly"> / ' + par + '</tspan>' : '') + '</text>' : '');
+    var t = holeTrace(r, h, cw - 64, ch - 78);
+    if (t){
+      drawn++;
+      var pp = t.p.map(function(q){ return (q.x + 32).toFixed(1) + ',' + (q.y + 46).toFixed(1); }).join(' ');
+      body += '<polyline points="' + pp + '" fill="none" stroke="' + CARD.under + '" stroke-width="3" stroke-opacity="0.85" stroke-linejoin="round" stroke-linecap="round"/>';
+      // the shots first, then the tee and the green on top so they are never covered
+      t.p.forEach(function(q, k){
+        if (k === 0 || (k === t.p.length - 1 && t.hasGreen)) return;
+        body += '<circle cx="' + (q.x + 32).toFixed(1) + '" cy="' + (q.y + 46).toFixed(1) + '" r="5.5" fill="' + CARD.under + '"/>';
+      });
+      var tee = t.p[0], last = t.p[t.p.length - 1];
+      body += '<rect x="' + (tee.x + 32 - 6).toFixed(1) + '" y="' + (tee.y + 46 - 6).toFixed(1) + '" width="12" height="12" rx="2" fill="' + CARD.ink + '"/>';
+      if (t.hasGreen) body += '<circle cx="' + (last.x + 32).toFixed(1) + '" cy="' + (last.y + 46).toFixed(1) + '" r="9" fill="none" stroke="' + CARD.ink + '" stroke-width="3"/>';
+      else body += '<circle cx="' + (last.x + 32).toFixed(1) + '" cy="' + (last.y + 46).toFixed(1) + '" r="5.5" fill="' + CARD.under + '"/>';
+      body += '<text x="14" y="' + (ch - 12) + '" class="celly">' + r0(t.yards) + ' yd</text>';
+    } else {
+      body += '<text x="' + (cw / 2) + '" y="' + (ch / 2 + 8) + '" text-anchor="middle" class="celly">no shots recorded</text>';
+    }
+    body += '</g>';
+  });
+  body = '<text x="60" y="170" class="note">Each hole turned so it plays left to right \u00b7 square is the tee, ring is the green</text>' + body;
+  body += '<text x="540" y="1272" text-anchor="middle" class="note">' + drawn + ' of ' + st.holes.length + ' holes have enough recorded to draw</text>';
+  return cardShell('EIGHTEEN HOLES', st, body);
+}
+window.__holesCardSVG = holesCardSVG;
+
 /* the picture: the same SVG, rasterised, so it can be shared or saved */
-function cardBlob(r, scale){
+var CARD_VIEWS = [['card', 'Card', function(r){ return roundCardSVG(r); }],
+                  ['numbers', 'Numbers', function(r){ return numbersCardSVG(r); }],
+                  ['holes', 'Holes', function(r){ return holesCardSVG(r); }]];
+function viewSVG(r, key){
+  for (var i = 0; i < CARD_VIEWS.length; i++) if (CARD_VIEWS[i][0] === key) return CARD_VIEWS[i][2](r);
+  return roundCardSVG(r);
+}
+function cardBlob(r, scale, key){
   return new Promise(function(resolve, reject){
-    var svg = roundCardSVG(r), img = new Image();
+    var svg = viewSVG(r, key || 'card'), img = new Image();
     img.onload = function(){
       var k = scale || 1, cv = document.createElement('canvas');
       cv.width = CARD_W * k; cv.height = CARD_H * k;
@@ -2241,21 +2448,36 @@ function openSummary(r){
   if (!r){ toast('No round to show yet.'); return; }
   var st = roundStats(r);
   if (!st.holes.length){ toast('Play a hole first and this fills in.'); return; }
-  var name = 'round-' + isoDate(r.started) + '.png';
+  var view = 'card';
   var el = openSheet(
     '<h3>Round card</h3>' +
     '<div class="sub">' + esc(st.course) + ' ·  ' + esc(niceDate(st.date)) + (st.allPar ? '' : ' · set par on every hole for the full card') + '</div>' +
-    '<div id="cardWrap" style="margin:8px 0 12px">' + roundCardSVG(r) + '</div>' +
+    '<div class="chips" id="cardTabs"></div>' +
+    '<div id="cardWrap" style="margin:8px 0 12px"></div>' +
     '<div class="row"><button class="btn sec" id="saveImg">Save picture</button><button class="btn pri" id="shareImg">Share</button></div>' +
     '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
-  var svgEl = el.querySelector('#cardWrap svg');
-  if (svgEl){ svgEl.removeAttribute('width'); svgEl.removeAttribute('height'); svgEl.style.width = '100%'; svgEl.style.height = 'auto'; svgEl.style.borderRadius = '16px'; svgEl.style.display = 'block'; }
+  function nameFor(){ return 'round-' + isoDate(r.started) + (view === 'card' ? '' : '-' + view) + '.png'; }
+  function drawView(){
+    $('#cardWrap').innerHTML = viewSVG(r, view);
+    var svgEl = $('#cardWrap svg');
+    if (svgEl){ svgEl.removeAttribute('width'); svgEl.removeAttribute('height'); svgEl.style.width = '100%'; svgEl.style.height = 'auto'; svgEl.style.borderRadius = '16px'; svgEl.style.display = 'block'; }
+  }
+  chips($('#cardTabs'), CARD_VIEWS.map(function(v){ return v[1]; }),
+    function(){ for (var i = 0; i < CARD_VIEWS.length; i++) if (CARD_VIEWS[i][0] === view) return CARD_VIEWS[i][1]; return null; },
+    function(v){
+      if (v == null) return;
+      CARD_VIEWS.forEach(function(x){ if (x[1] === v) view = x[0]; });
+      drawView();
+    });
+  drawView();
   el.querySelector('#saveImg').onclick = function(){
-    cardBlob(r, 1).then(function(b){ downloadBlob(name, b); toast('Saved as a picture'); })
+    var name = nameFor();
+    cardBlob(r, 1, view).then(function(b){ downloadBlob(name, b); toast('Saved as a picture'); })
       .catch(function(e){ toast('Could not make the picture: ' + e.message, 4000); });
   };
   el.querySelector('#shareImg').onclick = function(){
-    cardBlob(r, 1).then(function(b){
+    var name = nameFor();
+    cardBlob(r, 1, view).then(function(b){
       var f = null;
       try { f = new File([b], name, {type:'image/png'}); } catch(e){}
       if (f && navigator.canShare && navigator.canShare({files:[f]}) && navigator.share){
