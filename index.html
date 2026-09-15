@@ -14,10 +14,16 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
-:root{--g:#0f5132;--g2:#198754;--ink:#111;--mut:#555;--line:#d6d6d6;--red:#c62828}
+:root{--g:#0B3B2A;--g2:#15734A;--g3:#E9F2EC;--ink:#0E1512;--ink2:#36423C;--mut:#69786F;
+ --line:#DDE4DF;--line2:#EDF1EE;--bg:#EFF3F0;--gold:#A8762A;--red:#B3261E;
+ --r1:10px;--r2:14px;--r3:18px;--r4:26px;
+ --sh1:0 1px 2px rgba(11,59,42,.07),0 2px 8px rgba(11,59,42,.07);
+ --sh2:0 2px 8px rgba(11,59,42,.10),0 16px 34px rgba(11,59,42,.18);
+ --ease:cubic-bezier(.2,.8,.2,1)}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
-html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:#e9ece9;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%} /* Chrome on Android inflates text otherwise, which stretched button labels onto two lines */
+html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg);-webkit-tap-highlight-color:transparent;overscroll-behavior:none;-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;cursor:pointer}
 #mapWrap{position:fixed;top:0;left:0;right:0;bottom:200px;overflow:hidden;background:#cfd8cf}
 #map{position:absolute;top:0;left:0;width:100%;height:100%;background:#cfd8cf;transform-origin:50% 50%}
@@ -27,14 +33,15 @@ button{font:inherit;color:inherit;cursor:pointer}
 #rotBtn.on{background:var(--g2);color:#fff}
 #top{position:fixed;top:0;left:0;right:0;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;display:flex;align-items:center;gap:8px;z-index:1000;pointer-events:none}
 #top>*{pointer-events:auto}
-.ib{width:44px;height:44px;border-radius:12px;border:0;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35);font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center}
-#holeNav{display:flex;align-items:center;background:#fff;border-radius:12px;box-shadow:0 1px 5px rgba(0,0,0,.35)}
-#holeNav .ib{box-shadow:none;background:none;font-size:28px}
-#holeLabel{border:0;background:none;font-weight:800;font-size:18px;min-width:80px;height:44px}
-.pill{margin-left:auto;padding:9px 12px;border-radius:999px;font-weight:800;font-size:14px;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.35);white-space:nowrap}
+.ib{width:44px;height:44px;border-radius:13px;border:1px solid rgba(11,59,42,.07);background:rgba(255,255,255,.96);box-shadow:var(--sh1);font-size:21px;font-weight:700;display:flex;align-items:center;justify-content:center;color:var(--ink);transition:transform .12s var(--ease),background .12s var(--ease)}
+.ib:active{transform:scale(.93);background:var(--g3)}
+#holeNav{display:flex;align-items:center;background:rgba(255,255,255,.96);border:1px solid rgba(11,59,42,.07);border-radius:13px;box-shadow:var(--sh1)}
+#holeNav .ib{box-shadow:none;background:none;border:0;font-size:26px;color:var(--ink2)}
+#holeLabel{border:0;background:none;font-weight:800;font-size:17px;letter-spacing:-.2px;min-width:80px;height:44px}
+.pill{margin-left:auto;padding:9px 13px;border-radius:999px;font-weight:800;font-size:13px;letter-spacing:.2px;background:rgba(255,255,255,.96);border:1px solid rgba(11,59,42,.07);box-shadow:var(--sh1);white-space:nowrap}
 .pill.good{color:#0a7a33}.pill.fair{color:#a86b00}.pill.poor{color:var(--red)}
 #fabs{position:fixed;right:10px;bottom:230px;z-index:1000;display:flex;flex-direction:column;gap:8px}
-#panel{position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -2px 12px rgba(0,0,0,.25);padding:12px 16px calc(env(safe-area-inset-bottom) + 12px);z-index:1000}
+#panel{position:fixed;left:0;right:0;bottom:0;background:#fff;border-radius:var(--r4) var(--r4) 0 0;box-shadow:0 -1px 0 var(--line2),0 -8px 30px rgba(11,59,42,.14);padding:14px 16px calc(env(safe-area-inset-bottom) + 12px);z-index:1000}
 #liveNum{font-size:46px;font-weight:900;line-height:1.05;letter-spacing:-1px}
 #liveSub{color:var(--mut);font-size:14px;margin-top:2px}
 #lastCard{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
@@ -42,8 +49,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .link{border:0;background:none;color:var(--g2);font-weight:800;padding:6px 0 6px 12px}
 .chips{display:flex;gap:6px;overflow-x:auto;padding:4px 0;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
-.chip{flex:none;padding:8px 12px;border-radius:999px;border:1.5px solid #b9b9b9;background:#fff;font-size:14px;font-weight:700}
-.chip.on{background:var(--g);border-color:var(--g);color:#fff}
+.chip{flex:none;padding:8px 13px;border-radius:999px;border:1.5px solid var(--line);background:#fff;color:var(--ink2);font-size:14px;font-weight:700;transition:transform .12s var(--ease),background .12s var(--ease)}
+.chip:active{transform:scale(.96)}
+.chip.on{background:var(--g);border-color:var(--g);color:#fff;box-shadow:0 2px 8px rgba(11,59,42,.22)}
 .clab{flex:none;align-self:center;font-size:12px;color:var(--mut);width:46px;font-weight:700;text-transform:uppercase}
 .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 .actions .btn{font-size:16px;padding:0 4px;height:50px}
@@ -57,6 +65,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 #rcAsk{margin-top:8px}
 #rcClubs{display:grid;grid-template-rows:repeat(2,auto);grid-auto-flow:column;grid-auto-columns:max-content;gap:6px}
 #rcClubs .chip{padding:11px 13px;font-size:16px;font-weight:800}
+.leaflet-control-attribution{background:rgba(255,255,255,.7)!important;color:var(--mut)!important;font-size:10px!important;line-height:1.5!important;padding:1px 6px!important;border-radius:8px 0 0 0}
+.leaflet-control-attribution a{color:var(--mut)!important;text-decoration:none}
 .ptdot{width:12px;height:12px;border-radius:50%;background:#1e88e5;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
 .pill.lock{color:#fff;background:#0a7a33}
 .cchip{padding:3px 10px;font-size:15px;border-color:var(--g2);color:var(--g)}
@@ -83,31 +93,53 @@ button{font:inherit;color:inherit;cursor:pointer}
 .aimo{width:16px;height:16px;border-radius:50%;border:3px solid #ff9800;background:transparent}
 input[type=range]{width:100%;margin:8px 0}
 .split{font-weight:800;font-size:16px}
-.btn{height:58px;border-radius:14px;border:0;font-size:18px;font-weight:800;letter-spacing:.3px;width:100%}
-.pri{background:var(--g2);color:#fff}.pri:active{background:var(--g)}
-.sec{background:#e8f5ec;color:var(--g);border:2px solid var(--g2)}
-.ghost{background:#f1f1f1;color:#222}
-.danger{background:#fdecea;color:var(--red);border:2px solid #f3b4ae}
-#sheetWrap{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:2000;display:flex;align-items:flex-end}
-#sheet{background:#fff;width:100%;max-height:90vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px)}
-#sheet h3{margin:0 0 4px;font-size:20px}
+.btn{height:54px;border-radius:var(--r2);border:0;font-size:17px;font-weight:800;letter-spacing:.1px;width:100%;
+ display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;
+ transition:transform .12s var(--ease),background .15s var(--ease),box-shadow .15s var(--ease)}
+.btn:active{transform:scale(.975)}
+.pri{background:var(--g2);color:#fff;box-shadow:0 1px 2px rgba(11,59,42,.18),0 6px 16px rgba(21,115,74,.24)}
+.pri:active{background:var(--g);box-shadow:0 1px 2px rgba(11,59,42,.2)}
+.sec{background:var(--g3);color:var(--g);border:1.5px solid rgba(21,115,74,.3)}
+.sec:active{background:#DCEAE1}
+.ghost{background:#F3F5F3;color:var(--ink2);border:1.5px solid var(--line)}
+.danger{background:#FDECEA;color:var(--red);border:1.5px solid #F0B9B4}
+#sheetWrap{position:fixed;inset:0;background:rgba(9,26,19,.5);z-index:2000;display:flex;align-items:flex-end;-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:fadeIn .2s var(--ease)}
+#sheet{background:#fff;width:100%;max-height:92vh;overflow:auto;border-radius:var(--r4) var(--r4) 0 0;padding:10px 16px calc(env(safe-area-inset-bottom) + 16px);animation:sheetUp .3s var(--ease)}
+#sheet:before{content:"";display:block;width:38px;height:4px;border-radius:99px;background:#D6DED9;margin:0 auto 12px}
+#sheet h3{margin:0 0 4px;font-size:22px;font-weight:800;letter-spacing:-.35px}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes sheetUp{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){#sheetWrap,#sheet{animation:none}.btn,.chip,.ib{transition:none}}
 .sub{color:var(--mut);font-size:14px;margin-bottom:10px}
 .fl{display:block;font-size:13px;font-weight:800;color:var(--mut);text-transform:uppercase;margin:12px 0 4px}
-.fl input,.fl select,.fl textarea{display:block;width:100%;margin-top:4px;font-size:18px;padding:10px;border:1.5px solid #bbb;border-radius:10px;background:#fff;color:var(--ink);font-family:inherit;text-transform:none;font-weight:600}
+.fl input,.fl select,.fl textarea{display:block;width:100%;margin-top:4px;font-size:17px;padding:12px;border:1.5px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);font-family:inherit;text-transform:none;font-weight:600;transition:border-color .15s var(--ease),box-shadow .15s var(--ease)}
+.fl input:focus,.fl select:focus,.fl textarea:focus{outline:0;border-color:var(--g2);box-shadow:0 0 0 3px rgba(21,115,74,.14)}
 #ft{font-size:30px;font-weight:800}
 .chk{display:flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin:14px 0}
 .chk input{width:22px;height:22px}
 .row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
 .stack{display:grid;gap:10px;margin-top:12px}
 .clubs{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
-.clubs button{height:58px;border-radius:12px;border:1.5px solid #c4c4c4;background:#f6f7f6;font-size:17px;font-weight:800}
+.clubs button{height:56px;border-radius:12px;border:1.5px solid var(--line);background:#F7F9F7;font-size:17px;font-weight:800;transition:transform .12s var(--ease)}
+.clubs button:active{transform:scale(.97)}
 .clubs button:active{background:var(--g2);color:#fff}
-.menu button{display:block;width:100%;text-align:left;padding:15px 12px;border:0;border-bottom:1px solid var(--line);background:none;font-size:17px;font-weight:700}
-.rlist .ritem{border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+.mhead{background:linear-gradient(155deg,#16513A,#0B3B2A);color:#fff;border-radius:var(--r3);padding:15px 16px 16px;margin:2px 0 4px;box-shadow:0 6px 20px rgba(11,59,42,.22)}
+.mhead .mh1{font-size:19px;font-weight:800;letter-spacing:-.25px}
+.mhead .mh2{font-size:13px;font-weight:600;color:rgba(255,255,255,.74);margin-top:3px}
+.mhead .btn{margin-top:13px;height:44px;font-size:15px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.24);box-shadow:none}
+.mlab{font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--mut);margin:18px 4px 7px}
+.mgrp{background:#fff;border:1px solid var(--line);border-radius:var(--r2);overflow:hidden}
+.mrow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:13px 14px;border:0;border-bottom:1px solid var(--line2);background:none;font-size:16px;font-weight:700;color:var(--ink)}
+.mgrp .mrow:last-child{border-bottom:0}
+.mrow:active{background:var(--g3)}
+.mrow svg{flex:none;width:20px;height:20px;stroke:var(--g2);stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.mrow.warn svg{stroke:var(--gold)}
+.mrow .mchev{margin-left:auto;color:#BAC5BE;font-size:20px;font-weight:700;line-height:1}
+.rlist .ritem{border:1px solid var(--line);border-radius:var(--r2);padding:12px 13px;margin-bottom:9px;background:#fff}
 .ritem .rt{font-weight:800}.ritem .rs{color:var(--mut);font-size:13px;margin:2px 0 8px}
 .ritem .rb{display:flex;gap:8px}
-.ritem .rb button{flex:1;padding:9px;border-radius:10px;border:1.5px solid #bbb;background:#fff;font-weight:700;font-size:14px}
-.tag{display:inline-block;background:var(--g2);color:#fff;border-radius:6px;padding:1px 6px;font-size:11px;margin-left:6px;vertical-align:middle}
+.ritem .rb button{flex:1;padding:10px;border-radius:11px;border:1.5px solid var(--line);background:#fff;font-weight:700;font-size:14px;color:var(--ink2)}
+.tag{display:inline-block;background:var(--g2);color:#fff;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:800;letter-spacing:.6px;margin-left:6px;vertical-align:middle}
 .holegrid{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin:10px 0}
 .holegrid .chip{padding:14px 0;font-size:17px;text-align:center}
 .tblwrap{overflow-x:auto;margin-top:8px}
@@ -333,7 +365,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.11.0', SCHEMA = 5;
+var APP_VERSION = '1.12.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -690,7 +722,8 @@ function renderStatus(){
   if (!active() || !h){ main.textContent = 'Ready to play'; sub.textContent = 'PLAN your tee shot, or RECORD to mark your ball · ' + gps; return; }
   if (h.green){
     main.textContent = 'Hole ' + h.n + ' · ' + holeScore(h) + ' strokes';
-    sub.textContent = h.shots.length + ' shots · ' + puttCount(h) + ' putts' + (penTotal(cardOf(h)) ? ' · ' + penTotal(cardOf(h)) + ' penalty' : '') + ' · tap the flag to edit · ' + gps; return;
+    sub.textContent = plural(h.shots.length, 'shot') + ' · ' + plural(puttCount(h), 'putt') +
+      (penTotal(cardOf(h)) ? ' · ' + plural(penTotal(cardOf(h)), 'penalty', 'penalties') : '') + ' · tap the flag to edit · ' + gps; return;
   }
   if (!open){
     main.textContent = toG == null ? 'Hole ' + h.n + ' · no ball marked' : r0(toG) + ' yd to the green';
@@ -1163,6 +1196,7 @@ function renderHole(fit){
 }
 
 function openShot(h){ return (h && h.shots.length && !h.green) ? h.shots[h.shots.length - 1] : null; }
+function plural(n, one, many){ return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 function greenLabel(){
   var d = fix ? toGreenYd({lat:fix.lat, lng:fix.lng}) : null;
   return d == null ? 'green' : r0(d) + ' yd';
@@ -2454,7 +2488,7 @@ function openSummary(r){
     '<div class="sub">' + esc(st.course) + ' ·  ' + esc(niceDate(st.date)) + (st.allPar ? '' : ' · set par on every hole for the full card') + '</div>' +
     '<div class="chips" id="cardTabs"></div>' +
     '<div id="cardWrap" style="margin:8px 0 12px"></div>' +
-    '<div class="row"><button class="btn sec" id="saveImg">Save picture</button><button class="btn pri" id="shareImg">Share</button></div>' +
+    '<div class="row"><button class="btn sec" id="saveImg">Save card</button><button class="btn pri" id="shareImg">Share</button></div>' +
     '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
   function nameFor(){ return 'round-' + isoDate(r.started) + (view === 'card' ? '' : '-' + view) + '.png'; }
   function drawView(){
@@ -2761,57 +2795,102 @@ function openSettings(){
   };
 }
 
+var ICONS = {
+  trophy:'<path d="M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 6H4.5v1A3 3 0 0 0 7 10M17 6h2.5v1a3 3 0 0 1-2.5 3M9.5 19h5M12 14v5"/>',
+  grid:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/>',
+  list:'<path d="M8.5 6H21M8.5 12H21M8.5 18H21M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  wrench:'<path d="M15.5 3.5a5 5 0 0 0-6 6.4L3.6 15.8a2 2 0 1 0 2.8 2.8l5.9-5.9a5 5 0 0 0 6.4-6l-3 3-2.2-2.2z"/>',
+  stop:'<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1.2"/>',
+  play:'<circle cx="12" cy="12" r="9"/><path d="M10.2 8.4l6 3.6-6 3.6z"/>',
+  flag:'<path d="M5.5 21V3.5M5.5 4h11l-2.2 3.2L16.5 11h-11"/>',
+  pencil:'<path d="M4 20h4.2L20.2 8 16 3.8 4 15.8V20z"/><path d="M14.5 5.5l4 4"/>',
+  map:'<path d="M9 4.5L3 6.8v13.4l6-2.3 6 2.3 6-2.3V4.5l-6 2.3-6-2.3z"/><path d="M9 4.5v13.4M15 6.8v13.4"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.2 2"/>',
+  chart:'<path d="M4.5 20V10.5M10.5 20V4.5M16.5 20v-6.5M2.5 20h19"/>',
+  down:'<path d="M12 3.5v11.5M8 11l4 4 4-4M4 20.5h16"/>',
+  up:'<path d="M12 15.5V4M8 8l4-4 4 4M4 20.5h16"/>',
+  gear:'<circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.6 7.3l1.9 1.1M17.5 15.6l1.9 1.1M4.6 16.7l1.9-1.1M17.5 8.4l1.9-1.1"/>',
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11.2V16M12 8h.01"/>'
+};
+function icon(n){ return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[n] || '') + '</svg>'; }
+function mrow(id, ic, label, cls){
+  return '<button class="mrow' + (cls ? ' ' + cls : '') + '" id="' + id + '">' + icon(ic) +
+    '<span>' + label + '</span><span class="mchev">\u203a</span></button>';
+}
+function mgrp(label, rows){
+  rows = rows.filter(Boolean);
+  return rows.length ? '<div class="mlab">' + label + '</div><div class="mgrp">' + rows.join('') + '</div>' : '';
+}
 function openMenu(){
   var r = active();
+  var sc = r ? roundScore(r) : null;
   var el = openSheet(
-    '<h3>Shot Tracker</h3>' +
-    '<div class="sub">' + (r ? esc(r.course || 'Untitled course') + ' · ' + niceDate(r.started) + ' · ' + roundSummary(r) : 'No round in progress') + '</div>' +
-    '<div class="menu">' +
-    '<button id="mGuide">About &amp; how to use</button>' +
-    '<button id="mNew">New round</button>' +
-    '<button id="mCourse"' + (r ? '' : ' hidden') + '>Rename course</button>' +
-    '<button id="mGreen"' + (r && curHole() ? '' : ' hidden') + '>Green for this hole</button>' +
-    '<button id="mRounds">Rounds</button>' +
-    '<button id="mShots">Every shot</button>' +
-    '<button id="mReview">Review this round</button>' +
-    '<button id="mStats">Club distances</button>' +
-    '<button id="mOffline">Offline maps</button>' +
-    '<button id="mEnd"' + (r ? '' : ' hidden') + '>' + (r && r.ended ? 'Pick this round back up' : 'End round') + '</button>' +
-    '<button id="mScore"' + (r ? '' : ' hidden') + '>Scorecard</button>' +
-    '<button id="mSummary"' + (r ? '' : ' hidden') + '>Round card</button>' +
-    '<button id="mCard">Export round cards (CSV)</button>' +
-    '<button id="mCsv">Export all shots (CSV)</button>' +
-    '<button id="mBackup">Backup data (JSON)</button>' +
-    '<button id="mRestore">Restore from backup</button>' +
-    '<button id="mSettings">Settings</button>' +
-    '</div><input type="file" id="restoreFile" accept="application/json,.json" hidden>' +
+    '<div class="mhead">' +
+      '<div class="mh1">' + (r ? esc(r.course || 'Untitled course') : 'Shot Tracker') + '</div>' +
+      '<div class="mh2">' + (r
+        ? niceDate(r.started) + (r.ended ? '  ·  ended' : '') + '<br>' +
+          (sc && sc.holes
+            ? sc.strokes + (sc.toPar != null ? ' (' + (sc.toPar > 0 ? '+' : '') + sc.toPar + ')' : '') +
+              '  ·  ' + plural(sc.holes, 'hole') + '  ·  ' + plural(roundPutts(r), 'putt')
+            : 'nothing scored yet')
+        : 'No round in progress \u2014 start one to begin tracking') + '</div>' +
+      '<button class="btn" id="mNew">New round</button>' +
+    '</div>' +
+    mgrp('This round', r ? [
+      mrow('mScore', 'grid', 'Scorecard'),
+      mrow('mSummary', 'trophy', 'Round card'),
+      mrow('mShots', 'list', 'Every shot'),
+      mrow('mReview', 'wrench', 'Review and fix'),
+      mrow('mEnd', r.ended ? 'play' : 'stop', r.ended ? 'Pick this round back up' : 'End round', 'warn')
+    ] : []) +
+    mgrp('Course', r ? [
+      curHole() ? mrow('mGreen', 'flag', 'Green for hole ' + curHole().n) : '',
+      mrow('mCourse', 'pencil', 'Rename course'),
+      mrow('mOffline', 'map', 'Offline maps')
+    ] : [mrow('mOffline', 'map', 'Offline maps')]) +
+    mgrp('History', [
+      mrow('mRounds', 'clock', 'Rounds'),
+      mrow('mStats', 'chart', 'Club distances')
+    ]) +
+    mgrp('Your data', [
+      mrow('mCard', 'down', 'Export round cards'),
+      mrow('mCsv', 'down', 'Export every shot'),
+      mrow('mBackup', 'down', 'Back up everything'),
+      mrow('mRestore', 'up', 'Restore from a backup')
+    ]) +
+    mgrp('App', [
+      mrow('mSettings', 'gear', 'Settings'),
+      mrow('mGuide', 'info', 'About and how to use')
+    ]) +
+    '<input type="file" id="restoreFile" accept="application/json,.json" hidden>' +
     '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
-  el.querySelector('#mGuide').onclick = function(){ closeSheet(true); openGuide(); };
-  el.querySelector('#mNew').onclick = function(){
+  function on(id, fn){ var b = el.querySelector('#' + id); if (b) b.onclick = fn; }
+  on('mGuide', function(){ closeSheet(true); openGuide(); });
+  on('mNew', function(){
     var name = prompt('Course name (optional)', '');
     if (name === null) return;
     newRound(name.trim()); closeSheet(true); renderHole(true); keepAwake();
-  };
-  el.querySelector('#mCourse').onclick = function(){
+  });
+  on('mCourse', function(){
     var name = prompt('Course name', r.course || ''); if (name === null) return;
     r.course = name.trim();
     var c = r.courseId ? findCourse(r.courseId) : null; // keep the saved greens under the new name
     if (c && r.course) c.name = r.course;
     save(); closeSheet(true);
-  };
-  el.querySelector('#mGreen').onclick = function(){ var h = curHole(); closeSheet(true); if (h) openCourseGreen(h); };
-  el.querySelector('#mRounds').onclick = function(){ closeSheet(true); openRounds(); };
-  el.querySelector('#mStats').onclick = function(){ closeSheet(true); openStats(); };
-  el.querySelector('#mShots').onclick = function(){ closeSheet(true); openShotLog(active()); };
-  el.querySelector('#mReview').onclick = function(){ closeSheet(true); openReview(); };
-  el.querySelector('#mOffline').onclick = function(){ closeSheet(true); openOffline(); };
-  el.querySelector('#mSettings').onclick = function(){ closeSheet(true); openSettings(); };
-  if (r) el.querySelector('#mEnd').onclick = function(){ closeSheet(true); if (r.ended) resumeRound(r); else endRound(r); };
-  if (r) el.querySelector('#mScore').onclick = function(){ closeSheet(true); openScorecard(r); };
-  if (r) el.querySelector('#mSummary').onclick = function(){ closeSheet(true); openSummary(r); };
-  el.querySelector('#mCard').onclick = function(){ download('round-cards-' + isoDate(Date.now()) + '.csv', toCardCSV(S.rounds), 'text/csv'); };
-  el.querySelector('#mCsv').onclick = function(){ download('shots-' + isoDate(Date.now()) + '.csv', toCSV(S.rounds), 'text/csv'); };
-  el.querySelector('#mBackup').onclick = function(){
+  });
+  on('mGreen', function(){ var h = curHole(); closeSheet(true); if (h) openCourseGreen(h); });
+  on('mRounds', function(){ closeSheet(true); openRounds(); });
+  on('mStats', function(){ closeSheet(true); openStats(); });
+  on('mShots', function(){ closeSheet(true); openShotLog(active()); });
+  on('mReview', function(){ closeSheet(true); openReview(); });
+  on('mOffline', function(){ closeSheet(true); openOffline(); });
+  on('mSettings', function(){ closeSheet(true); openSettings(); });
+  on('mEnd', function(){ closeSheet(true); if (r.ended) resumeRound(r); else endRound(r); });
+  on('mScore', function(){ closeSheet(true); openScorecard(r); });
+  on('mSummary', function(){ closeSheet(true); openSummary(r); });
+  on('mCard', function(){ download('round-cards-' + isoDate(Date.now()) + '.csv', toCardCSV(S.rounds), 'text/csv'); });
+  on('mCsv', function(){ download('shots-' + isoDate(Date.now()) + '.csv', toCSV(S.rounds), 'text/csv'); });
+  on('mBackup', function(){
     if (trailDirty){ trailDirty = false; saveTrail(active()); }
     store.keys().then(function(keys){
       var tk = keys.filter(function(k){ return String(k).indexOf('trail:') === 0; });
@@ -2821,9 +2900,9 @@ function openMenu(){
         download('shot-tracker-backup-' + isoDate(Date.now()) + '.json', JSON.stringify(Object.assign({}, S, {trails:all, appVersion:APP_VERSION, exportedAt:new Date().toISOString()})), 'application/json');
       });
     }).catch(function(){ toast('Backup failed. Try again.'); });
-  };
+  });
   var rf = el.querySelector('#restoreFile');
-  el.querySelector('#mRestore').onclick = function(){ rf.click(); };
+  on('mRestore', function(){ rf.click(); });
   rf.onchange = function(){
     var f = rf.files[0]; if (!f) return;
     f.text().then(function(t){
