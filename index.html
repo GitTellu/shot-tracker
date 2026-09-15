@@ -224,7 +224,11 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 #tgtBar .t{flex:1;font-size:13px;font-weight:700;line-height:1.25}
 #tgtBar button{border:0;border-radius:10px;padding:9px 12px;font-weight:800;font-size:14px}
 #tgtSave{background:var(--g);color:#fff}#tgtCancel{background:#333;color:#fff}
-.leaflet-tooltip.dtip{background:rgba(17,17,17,.85);color:#fff;border:0;font-weight:800;font-size:13px;padding:3px 7px;border-radius:8px;box-shadow:none}
+/* The pill is the inner span, not the tooltip box: the box carries Leaflet's own positioning, and
+   turning the box instead would spin it about the pane's origin and throw it off the screen. */
+.leaflet-tooltip.dtip{background:none;border:0;box-shadow:none;padding:0;color:#fff;font-weight:800;font-size:13px}
+.leaflet-tooltip.dtip .urot{display:inline-block;background:rgba(14,21,18,.86);padding:3px 7px;border-radius:9px;box-shadow:0 1px 4px rgba(0,0,0,.28)}
+.leaflet-tooltip.dtip.hid{display:none}
 .leaflet-tooltip.dtip:before{display:none}
 #fatal{position:fixed;inset:0;z-index:5000;background:#fff;padding:24px;font-size:17px;line-height:1.5}
 </style>
@@ -365,7 +369,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.12.0', SCHEMA = 5;
+var APP_VERSION = '1.13.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -822,6 +826,7 @@ function applyRotation(light){
   $('#rotBtn').textContent = rotMode === 'north' ? 'N' : (bearing ? r0(bearing) + '°' : ROT_LABEL[rotMode]);
   $('#rotBtn').classList.toggle('on', rotMode !== 'north');
   map.invalidateSize();
+  relabel();
 }
 function autoBearing(){
   var g = greenFor(curHole()); // the hole's own line: you to the green
@@ -1123,6 +1128,56 @@ function roundScore(r){
 function roundPutts(r){ return (r ? r.holes : []).reduce(function(t, h){ return t + puttCount(h); }, 0); }
 window.__holeScore = holeScore; window.__roundScore = roundScore;
 
+/* ---------- keeping the labels readable ----------
+   Permanent labels pile on top of each other wherever shots bunch up, which is exactly around a
+   green. Lay them out in screen space: the ones that matter most keep their place, the rest are
+   nudged clear, and anything with nowhere left to go is hidden rather than left as mush. It is
+   redone whenever the map moves, turns or is redrawn, so it always suits what is on screen. */
+var DE_PAD = 3, DE_TRIES = 10;
+function declutter(){
+  var host = $('#map'); if (!host) return;
+  var els = Array.prototype.slice.call(host.querySelectorAll('.leaflet-tooltip.dtip'));
+  if (!els.length) return;
+  els.forEach(function(e){ e.style.translate = ''; e.classList.remove('hid'); });
+  var boxes = els.map(function(e){
+    var r = (e.querySelector('.urot') || e).getBoundingClientRect();
+    return {e:e, x:r.left, y:r.top, w:r.width, h:r.height,
+            pr:e.classList.contains('p1') ? 1 : (e.classList.contains('p3') ? 3 : 2)};
+  });
+  boxes.sort(function(a, b){ return a.pr - b.pr || a.y - b.y; });
+  // the pins and the flag are what the labels are about: never sit on top of one
+  var vp = $('#mapWrap').getBoundingClientRect();
+  var placed = Array.prototype.slice.call(host.querySelectorAll('.leaflet-marker-icon')).map(function(m){
+    var r = (m.firstElementChild || m).getBoundingClientRect();
+    return {x:r.left, y:r.top, w:r.width, h:r.height};
+  }).filter(function(q){ return q.w && q.h; });
+  function clash(x, y, w, h){
+    for (var i = 0; i < placed.length; i++){
+      var q = placed[i];
+      if (x + w + DE_PAD > q.x && x < q.x + q.w + DE_PAD && y + h + DE_PAD > q.y && y < q.y + q.h + DE_PAD) return true;
+    }
+    return false;
+  }
+  function inView(y, h){ return y >= vp.top - 2 && y + h <= vp.bottom + 2; }
+  boxes.forEach(function(b){
+    var step = b.h + DE_PAD, dy = 0, ok = inView(b.y, b.h) && !clash(b.x, b.y, b.w, b.h);
+    for (var i = 1; !ok && i <= DE_TRIES; i++){
+      dy = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * step;   // out from where it wants to be, both ways
+      ok = inView(b.y + dy, b.h) && !clash(b.x, b.y + dy, b.w, b.h);
+    }
+    if (!ok){ b.e.classList.add('hid'); return; }
+    if (dy){ var v = rotIn(0, dy); b.e.style.translate = v.x.toFixed(1) + 'px ' + v.y.toFixed(1) + 'px'; }
+    placed.push({x:b.x, y:b.y + dy, w:b.w, h:b.h});
+  });
+}
+var deQueued = false;
+function relabel(){
+  if (deQueued) return;
+  deQueued = true;
+  requestAnimationFrame(function(){ deQueued = false; try { declutter(); } catch(e){} });
+}
+window.__declutter = declutter; window.__relabel = relabel;
+
 /* ---------- rendering ---------- */
 function layout(){
   var ph = $('#panel').offsetHeight;
@@ -1157,14 +1212,14 @@ function renderHole(fit){
       if (e){
         var d = yd(distM(s, e.pt));
         L.polyline([[s.lat,s.lng],[e.pt.lat,e.pt.lng]], {color:s.excluded ? '#9e9e9e' : '#ff9800', weight:4, opacity:0.95})
-          .bindTooltip('<span class="urot">' + r0(d) + ' yd · ' + esc(s.club || 'club?') + '</span>', {permanent:true, direction:'center', className:'dtip'})
+          .bindTooltip('<span class="urot">' + r0(d) + ' yd · ' + esc(s.club || 'club?') + '</span>', {permanent:true, direction:'center', className:'dtip p2'})
           .addTo(holeLayer);
       }
       if (s.plan){
         var am = L.marker([s.plan.lat, s.plan.lng], {icon:aimDoneIcon, interactive:false}).addTo(holeLayer);
         var pr = planResultFor(h, i);
         if (e && pr) L.polyline([[s.plan.lat, s.plan.lng], [e.pt.lat, e.pt.lng]], {color:'#ff9800', weight:2, dashArray:'4 6', opacity:0.9})
-          .bindTooltip('<span class="urot">' + missText(pr) + '</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(holeLayer);
+          .bindTooltip('<span class="urot">' + missText(pr) + '</span>', {permanent:true, direction:'center', className:'dtip p3'}).addTo(holeLayer);
       }
       var m = L.marker([s.lat, s.lng], {icon:pinIcon(i+1, s.excluded), zIndexOffset:1000}).addTo(holeLayer);
       m.on('click', function(){ openShotEdit(h, i); });
@@ -1172,14 +1227,14 @@ function renderHole(fit){
     });
     if (greenPos(h)){
       var gm = L.marker([h.green.lat, h.green.lng], {icon:flagIcon, zIndexOffset:1100}).addTo(holeLayer);
-      gm.bindTooltip('<span class="urot">' + holeScore(h) + (h.green.feet == null ? '' : ' · ' + h.green.feet + ' ft') + '</span>', {permanent:true, direction:'right', offset:[14,0], className:'dtip'});
+      gm.bindTooltip('<span class="urot">' + holeScore(h) + (h.green.feet == null ? '' : ' · ' + h.green.feet + ' ft') + '</span>', {permanent:true, direction:'right', offset:[14,0], className:'dtip p2'});
       gm.on('click', function(){ openGreenEdit(h); });
       markers.green = gm;
     }
     var cg = greenFor(h);
     if (cg && !(placing && placing.n === h.n)){
       var cm = L.marker([cg.lat, cg.lng], {icon:greenIcon, zIndexOffset:900}).addTo(holeLayer);
-      cm.bindTooltip('<span class="urot">' + greenLabel() + '</span>', {permanent:true, direction:'top', offset:[0,-15], className:'dtip'});
+      cm.bindTooltip('<span class="urot">' + greenLabel() + '</span>', {permanent:true, direction:'top', offset:[0,-15], className:'dtip p1'});
       cm.on('click', function(){ openCourseGreen(h); });
       markers.cgreen = cm;
     }
@@ -1192,7 +1247,7 @@ function renderHole(fit){
       else if (fix){ follow = true; map.setView([fix.lat, fix.lng], 18); }
     }
   }
-  updateLive(); drawPlan(); renderPoints();
+  updateLive(); drawPlan(); renderPoints(); relabel();
 }
 
 function openShot(h){ return (h && h.shots.length && !h.green) ? h.shots[h.shots.length - 1] : null; }
@@ -1205,7 +1260,7 @@ function updateLive(){
   var h = curHole(), open = openShot(h);
   if (open && fix) liveLine.setLatLngs([[open.lat, open.lng], [fix.lat, fix.lng]]);
   else liveLine.setLatLngs([]);
-  if (markers.cgreen && markers.cgreen.setTooltipContent) markers.cgreen.setTooltipContent('<span class="urot">' + greenLabel() + '</span>');
+  if (markers.cgreen && markers.cgreen.setTooltipContent){ markers.cgreen.setTooltipContent('<span class="urot">' + greenLabel() + '</span>'); relabel(); }
   renderStatus();
 }
 
@@ -1765,6 +1820,7 @@ function endPlan(silent){
 }
 function setAim(ll){ if (!plan) return; plan.aim = {lat:ll.lat, lng:ll.lng}; drawPlan(); renderPlanInfo(); }
 map.on('click', function(e){ if (placing){ placeGreenMarker(e.latlng); return; } if (plan) setAim(e.latlng); });
+map.on('moveend zoomend', relabel);
 
 function drawPlan(){
   if (!plan){ planLayer.clearLayers(); aimMarker = null; return; }
@@ -1773,7 +1829,7 @@ function drawPlan(){
   var poly = patternPolygon(st, plan.aim, plan.pat);
   if (poly.length) L.polygon(poly, {color:'#ff9800', weight:2, fillColor:'#ff9800', fillOpacity:0.18, interactive:false}).addTo(planLayer);
   L.polyline([[st.lat, st.lng], [plan.aim.lat, plan.aim.lng]], {color:'#ffffff', weight:3, opacity:0.95, interactive:false})
-    .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
+    .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip p1'}).addTo(planLayer);
   planGreenLine();
   aimMarker = L.marker([plan.aim.lat, plan.aim.lng], {icon:aimIcon, draggable:!bearing, zIndexOffset:2000}).addTo(planLayer);
   aimMarker.on('dragstart', function(){ aimDragging = true; follow = false; });
@@ -1824,7 +1880,7 @@ function attachRotDrag(m, h){
 function planGreenLine(){
   var g = plan ? greenFor(curHole()) : null; if (!g) return;
   L.polyline([[plan.aim.lat, plan.aim.lng], [g.lat, g.lng]], {color:'#ffffff', weight:2, dashArray:'5 6', opacity:0.9, interactive:false})
-    .bindTooltip('<span class="urot">' + r0(yd(distM(plan.aim, g))) + ' yd to green</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
+    .bindTooltip('<span class="urot">' + r0(yd(distM(plan.aim, g))) + ' yd to green</span>', {permanent:true, direction:'center', className:'dtip p1'}).addTo(planLayer);
 }
 function redrawShapeOnly(){
   // cheap redraw while dragging: rebuild everything except the marker being dragged
@@ -1833,7 +1889,7 @@ function redrawShapeOnly(){
   var poly = patternPolygon(st, plan.aim, plan.pat);
   if (poly.length) L.polygon(poly, {color:'#ff9800', weight:2, fillColor:'#ff9800', fillOpacity:0.18, interactive:false}).addTo(planLayer);
   L.polyline([[st.lat, st.lng], [plan.aim.lat, plan.aim.lng]], {color:'#ffffff', weight:3, opacity:0.95, interactive:false})
-    .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip'}).addTo(planLayer);
+    .bindTooltip('<span class="urot">' + r0(yd(distM(st, plan.aim))) + ' yd</span>', {permanent:true, direction:'center', className:'dtip p1'}).addTo(planLayer);
   planGreenLine();
   if (!aimMarker) drawPlan();
 }
