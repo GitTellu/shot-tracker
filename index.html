@@ -144,6 +144,22 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
 .flag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid #d32f2f;color:#d32f2f;font-weight:900;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.scrow{border:1px solid var(--line);border-radius:12px;padding:9px 10px;margin-bottom:8px}
+.scrow.done{border-color:#bcd7c6;background:#fbfdfb}
+.scrow .sch{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.scrow .sch b{font-size:15px;font-weight:800}
+.scrow .scn{font-size:12px;font-weight:800;color:var(--mut)}
+.scrow .scn.u{color:#a3712a}.scrow .scn.o{color:#1c6ea4}
+.scrow .sch .link{margin-left:auto;font-size:13px;padding:3px 0 3px 10px}
+.scg{display:flex;gap:6px}
+.mini{flex:1;min-width:0;text-align:center}
+.mini .ml{display:block;font-size:10px;letter-spacing:1.1px;font-weight:800;color:var(--mut);margin-bottom:3px}
+.mini .mc{display:flex;align-items:center;justify-content:center;gap:1px}
+.mini button{width:30px;height:32px;border-radius:8px;border:1.5px solid var(--line);background:#fff;font-size:16px;font-weight:900;line-height:1;padding:0}
+.mini b{min-width:28px;font-size:16px;font-weight:900}
+.mini.set b{color:var(--g2)}
+.scTot{position:sticky;top:0;background:#fff;padding:6px 0 10px;font-weight:800;font-size:15px;z-index:2}
+.scTot span{font-weight:700;color:var(--mut);font-size:13px}
 .slog .sl{display:flex;gap:10px;width:100%;text-align:left;border:1px solid var(--line);border-radius:12px;padding:9px 10px;margin-bottom:7px;background:#fff;align-items:flex-start}
 .slog .sl.aimed{border-color:#f0c48a}
 .slog .slh{flex:none;min-width:46px;height:34px;border-radius:9px;background:#f2f5f2;color:var(--g2);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center}
@@ -317,7 +333,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.8.0', SCHEMA = 5;
+var APP_VERSION = '1.9.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -442,9 +458,11 @@ function newRound(course){
   save(); return r;
 }
 function markPlaying(r){ S.playingId = r.id; r.lastAt = Date.now(); }
+function greenPos(h){ return (h && h.green && !h.green.noPos && h.green.lat != null) ? h.green : null; }
 function shotEnd(h, i){
   if (i < h.shots.length - 1) return {pt:h.shots[i+1], type:'next shot'};
-  if (h.green) return {pt:h.green, type:'green'};
+  var g = greenPos(h); // a hole filled in afterwards has no finish position, so nothing to measure to
+  if (g) return {pt:g, type:'green'};
   return null;
 }
 function shotDistYd(h, i){ var e = shotEnd(h, i); return e ? yd(distM(h.shots[i], e.pt)) : null; }
@@ -1048,16 +1066,17 @@ function puttCount(h){
 }
 function countedShots(h){ return h ? h.shots.filter(function(s){ return !s.excluded; }).length : 0; }
 function autoScore(h){ return countedShots(h) + puttCount(h) + penTotal(cardOf(h)); }
+function holePlayed(h){ var c = cardOf(h); return !!(h && (h.green || h.shots.length || (c && c.score != null))); }
 function holeScore(h){
   var c = cardOf(h);
   if (c && c.score != null) return c.score;
-  return (h && (h.green || h.shots.length)) ? autoScore(h) : null;
+  return holePlayed(h) ? autoScore(h) : null;
 }
 function roundScore(r){
   var t = 0, played = 0, par = 0, parred = 0;
   (r ? r.holes : []).forEach(function(h){
     var v = holeScore(h);
-    if (v != null && (h.green || h.shots.length)){
+    if (v != null && holePlayed(h)){
       t += v; played++;
       var pp = parFor(h); if (pp){ par += pp; parred++; }
     }
@@ -1114,7 +1133,7 @@ function renderHole(fit){
       m.on('click', function(){ openShotEdit(h, i); });
       markers[s.id] = m;
     });
-    if (h.green){
+    if (greenPos(h)){
       var gm = L.marker([h.green.lat, h.green.lng], {icon:flagIcon, zIndexOffset:1100}).addTo(holeLayer);
       gm.bindTooltip('<span class="urot">' + holeScore(h) + (h.green.feet == null ? '' : ' · ' + h.green.feet + ' ft') + '</span>', {permanent:true, direction:'right', offset:[14,0], className:'dtip'});
       gm.on('click', function(){ openGreenEdit(h); });
@@ -1129,9 +1148,9 @@ function renderHole(fit){
     }
     if (fit){
       var pts = h.shots.map(function(s){ return [s.lat, s.lng]; });
-      if (h.green) pts.push([h.green.lat, h.green.lng]);
+      if (greenPos(h)) pts.push([h.green.lat, h.green.lng]);
       if (cg) pts.push([cg.lat, cg.lng]);
-      if (fix && (cg || !h.green)) pts.push([fix.lat, fix.lng]);
+      if (fix && (cg || !greenPos(h))) pts.push([fix.lat, fix.lng]);
       if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); autoFitAt = Date.now(); autoFitD = (cg && fix) ? distM(fix, cg) : null; }
       else if (fix){ follow = true; map.setView([fix.lat, fix.lng], 18); }
     }
@@ -1435,6 +1454,7 @@ function onGreen(){
   openCard(h, 'finish');
 }
 function openGreenEdit(h){ openCard(h, 'edit'); }
+window.__openCard = openCard;
 
 /* One sheet, used to finish a hole and to edit it afterwards. Only the distance is asked for;
    putts, bunkers and penalty strokes are there for anyone who wants the full picture. */
@@ -1457,7 +1477,7 @@ function openCard(h, mode){
     '<div class="fl">Bunkers and penalty strokes</div><div id="trouble"></div>' +
     '<div class="fl">Score</div><div id="scoreStep"></div><div class="scoreline" id="scoreWhy"></div>' +
     '<label class="fl">Note<input id="cnote" type="text" maxlength="120" placeholder="anything worth remembering" value="' + esc(c.note || '') + '"></label>' +
-    (finish ? '' : '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="reopen">Reopen hole</button></div>') +
+    (finish || !greenPos(h) ? '' : '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="reopen">Reopen hole</button></div>') +
     '<div class="row"><button class="btn ghost" id="cancel">Cancel</button><button class="btn pri" id="fin">' + (finish ? 'Finish hole' : 'Save') + '</button></div>',
     function(){ cap = null; });
 
@@ -1533,8 +1553,8 @@ function openCard(h, mode){
   if (finish && !c.putts.length) setTimeout(function(){ ft.focus(); }, 50);
 
   el.querySelector('#cancel').onclick = function(){ closeSheet(); };
-  if (!finish){
-    el.querySelector('#move').onclick = function(){ commit(); closeSheet(true); enableMove('green', h.green); };
+  if (!finish && greenPos(h)){
+    el.querySelector('#move').onclick = function(){ closeSheet(true); enableMove('green', h.green); };
     el.querySelector('#reopen').onclick = function(){
       if (!confirm('Reopen hole ' + h.n + '? The green marker and everything on this card stay, but the hole counts as unfinished again.')) return;
       var r = active(); h.green = null; r.cur = r.holes.indexOf(h); save(); closeSheet(true); renderHole(true);
@@ -1553,7 +1573,10 @@ function openCard(h, mode){
     if (!got){ toast('Enter feet as a number, or leave it blank.'); return; }
     setPar(h, par);
     if (!finish){
-      h.card = c; h.green.feet = got.feet; h.green.holed = got.holed; h.green.putts = c.putts.length;
+      h.card = c;
+      // filled in afterwards: record the hole as done without inventing a place it finished
+      if (!h.green) h.green = {noPos:true, t:Date.now(), feet:got.feet, putts:c.putts.length, holed:got.holed};
+      else { h.green.feet = got.feet; h.green.holed = got.holed; h.green.putts = c.putts.length; }
       save(); closeSheet(true); renderHole(false); return;
     }
     closeSheet(true);
@@ -2005,7 +2028,7 @@ function toCardCSV(rounds){
     'feet_to_pin','holed','yards_tee_to_green','putt_detail','note']];
   rounds.forEach(function(r){
     r.holes.forEach(function(h){
-      if (!h.shots.length && !h.green) return;
+      if (!holePlayed(h)) return;
       var c = cardOf(h), par = courseParFor(r, h), sc = holeScore(h), g = courseGreenFor(r, h);
       rows.push([isoDate(r.started), r.course, h.n, par || '', sc == null ? '' : sc,
         (par && sc != null) ? (sc - par > 0 ? '+' : '') + (sc - par) : '',
@@ -2039,7 +2062,7 @@ var CARD_W = 1080, CARD_H = 1350;
 var CARD = {bg:'#0C1F17', bg2:'#123026', ink:'#F4F1E8', mut:'#9DB0A4', line:'#24483A',
             under:'#EFB84A', over:'#5FAEDB'};
 function roundStats(r){
-  var played = r.holes.filter(function(h){ return h.green || h.shots.length; });
+  var played = r.holes.filter(holePlayed);
   var st = {holes:[], strokes:0, par:0, toPar:null, allPar:true, putts:0, one:0, three:0,
             pen:0, bunk:0, eagle:0, birdie:0, parN:0, bogey:0, dbl:0,
             longDrive:null, longPutt:null, best:null, date:r.started, course:r.course || 'Untitled course'};
@@ -2323,6 +2346,84 @@ function openShotLog(r){
   el.querySelector('#close').onclick = function(){ closeSheet(); };
 }
 window.__openShotLog = openShotLog;
+
+/* ---------- the scorecard, filled in afterwards ----------
+   Everything the round card needs, on one screen: par, score and putts for all eighteen. Par is
+   what turns a score into a birdie or a bogey, so without it nothing on the card gets circled. */
+function ensureCard(h){ if (!h.card) h.card = blankCard(); return h.card; }
+function setParFor(r, h, v){
+  var c = courseForRound(r);
+  if (!c){
+    c = {id:uid(), name:(r.course || '').trim() || 'Course', t:Date.now(), greens:{}, pars:{}};
+    S.courses.push(c); r.courseId = c.id;
+  }
+  c.pars = c.pars || {};
+  if (v) c.pars[h.n] = v; else delete c.pars[h.n];
+}
+function setPuttCount(h, n){
+  var c = ensureCard(h);
+  while (c.putts.length > n) c.putts.pop();
+  while (c.putts.length < n) c.putts.push({ft:null, read:null, act:null, out:null});
+  if (h.green) h.green.putts = c.putts.length;
+}
+function openScorecard(r){
+  if (!r){ toast('No round open. Open one from Rounds first.'); return; }
+  var el = openSheet(
+    '<h3>Scorecard</h3>' +
+    '<div class="sub">' + esc(r.course || 'This round') + ' · fill in par, score and putts for any hole, whenever you like. Par is what puts the circles and squares on your round card.</div>' +
+    '<div class="scTot" id="scTot"></div><div id="scList"></div>' +
+    '<div class="row"><button class="btn sec" id="scCard">Round card</button><button class="btn pri" id="close">Done</button></div>');
+
+  function mini(label, val, on, kind, hi){
+    return '<div class="mini' + (on ? ' set' : '') + '"><span class="ml">' + label + '</span><span class="mc">' +
+      '<button data-k="' + kind + '" data-h="' + hi + '" data-d="-1">&minus;</button>' +
+      '<b>' + val + '</b>' +
+      '<button data-k="' + kind + '" data-h="' + hi + '" data-d="1">+</button></span></div>';
+  }
+  function draw(){
+    var sc = roundScore(r), putts = roundPutts(r);
+    $('#scTot').innerHTML = (sc.holes ? sc.strokes + (sc.toPar != null ? ' (' + (sc.toPar > 0 ? '+' : '') + sc.toPar + ')' : '') : '\u2014') +
+      ' <span>· ' + sc.holes + ' hole' + (sc.holes === 1 ? '' : 's') + ' · ' + putts + ' putts' +
+      (sc.holes && sc.parHoles < sc.holes ? ' · par missing on ' + (sc.holes - sc.parHoles) : '') + '</span>';
+    var html = '';
+    r.holes.forEach(function(h, hi){
+      var par = courseParFor(r, h), c = cardOf(h), v = holeScore(h), pc = puttCount(h);
+      var nm = (par && v != null) ? scoreName(v - par) : '';
+      html += '<div class="scrow' + (holePlayed(h) ? ' done' : '') + '">' +
+        '<div class="sch"><b>Hole ' + h.n + '</b>' +
+        (nm ? '<span class="scn ' + (par && v < par ? 'u' : (par && v > par ? 'o' : '')) + '">' + nm + '</span>' : '') +
+        '<button class="link" data-k="more" data-h="' + hi + '">Details \u203a</button></div><div class="scg">' +
+        mini('PAR', par || '\u2014', !!par, 'par', hi) +
+        mini('SCORE', v == null ? '\u2014' : v, !!(c && c.score != null), 'score', hi) +
+        mini('PUTTS', pc, !!(c && c.putts.length), 'putts', hi) +
+        '</div></div>';
+    });
+    $('#scList').innerHTML = html;
+    Array.prototype.forEach.call(el.querySelectorAll('#scList button'), function(b){
+      b.onclick = function(){
+        var h = r.holes[+b.dataset.h], k = b.dataset.k;
+        if (k === 'more'){ closeSheet(true); r.cur = +b.dataset.h; save(); renderHole(true); openCard(h, 'edit'); return; }
+        var d = +b.dataset.d;
+        if (k === 'par'){
+          var p0 = courseParFor(r, h);
+          setParFor(r, h, p0 == null ? (d > 0 ? 4 : 3) : Math.max(3, Math.min(6, p0 + d)));
+        }
+        else if (k === 'score'){
+          var cur = holeScore(h);
+          if (cur == null) cur = (courseParFor(r, h) || 4) - (d < 0 ? 0 : 1);
+          ensureCard(h).score = Math.max(1, Math.min(20, cur + d));
+        } else {
+          setPuttCount(h, Math.max(0, Math.min(9, puttCount(h) + d)));
+        }
+        save(); draw();
+      };
+    });
+  }
+  draw();
+  el.querySelector('#scCard').onclick = function(){ closeSheet(true); openSummary(r); };
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+window.__openScorecard = openScorecard;
 function download(name, text, type){
   var blob = new Blob([text], {type:type}), a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
@@ -2415,6 +2516,7 @@ function openMenu(){
     '<button id="mReview">Review this round</button>' +
     '<button id="mStats">Club distances</button>' +
     '<button id="mOffline">Offline maps</button>' +
+    '<button id="mScore"' + (r ? '' : ' hidden') + '>Scorecard</button>' +
     '<button id="mSummary"' + (r ? '' : ' hidden') + '>Round card</button>' +
     '<button id="mCard">Export round cards (CSV)</button>' +
     '<button id="mCsv">Export all shots (CSV)</button>' +
@@ -2443,6 +2545,7 @@ function openMenu(){
   el.querySelector('#mReview').onclick = function(){ closeSheet(true); openReview(); };
   el.querySelector('#mOffline').onclick = function(){ closeSheet(true); openOffline(); };
   el.querySelector('#mSettings').onclick = function(){ closeSheet(true); openSettings(); };
+  if (r) el.querySelector('#mScore').onclick = function(){ closeSheet(true); openScorecard(r); };
   if (r) el.querySelector('#mSummary').onclick = function(){ closeSheet(true); openSummary(r); };
   el.querySelector('#mCard').onclick = function(){ download('round-cards-' + isoDate(Date.now()) + '.csv', toCardCSV(S.rounds), 'text/csv'); };
   el.querySelector('#mCsv').onclick = function(){ download('shots-' + isoDate(Date.now()) + '.csv', toCSV(S.rounds), 'text/csv'); };
