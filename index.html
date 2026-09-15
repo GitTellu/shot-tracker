@@ -333,7 +333,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.9.0', SCHEMA = 5;
+var APP_VERSION = '1.10.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -679,7 +679,9 @@ document.addEventListener('visibilitychange', function(){ still = []; if (docume
 function renderStatus(){
   var main = $('#stMain'), sub = $('#stSub'); if (!main) return;
   var h = curHole(), open = openShot(h), ls = lockState();
-  var gps = !fix ? 'waiting for GPS' : (Date.now() - fix.t > STALE_FIX_MS ? 'GPS ' + Math.round((Date.now() - fix.t) / 1000) + ' s old' : (ls.locked ? 'locked ±' + r0(yd(ls.pos.acc)) + ' yd' : 'getting a fresh fix'));
+  var rr = active();
+  var gps = rr && rr.ended ? 'round ended' :
+    (!fix ? 'waiting for GPS' : (Date.now() - fix.t > STALE_FIX_MS ? 'GPS ' + Math.round((Date.now() - fix.t) / 1000) + ' s old' : (ls.locked ? 'locked ±' + r0(yd(ls.pos.acc)) + ' yd' : 'getting a fresh fix')));
   var toG = (h && fix) ? toGreenYd({lat:fix.lat, lng:fix.lng}, h) : null;
   var gTxt = toG == null ? '' : ' · ' + r0(toG) + ' yd to green';
   var unfinished = !!(h && h.shots.length && !h.green);
@@ -709,17 +711,19 @@ document.addEventListener('visibilitychange', function(){ if (document.visibilit
 window.addEventListener('pagehide', function(){ save(); if (trailDirty){ trailDirty = false; saveTrail(active()); } });
 
 /* ---------- automatic points: a light record of where you were, for fixing a round afterwards ---------- */
-var AUTO_POINT_MS = 60000, lastPointAt = 0;
+var AUTO_POINT_MS = 60000, AUTO_POINT_IDLE_MS = 6 * 3600 * 1000, lastPointAt = 0;
 function maybeAutoPoint(force){
   if (!booted || document.visibilityState === 'hidden') return;
   var r = active();
-  if (!r || r.id !== S.playingId || !fix) return;
+  if (!r || r.id !== S.playingId || r.ended || !fix) return;
+  if (Date.now() - (r.lastAt || r.started) > AUTO_POINT_IDLE_MS) return; // a round you forgot to end is not a drive home
   if (Date.now() - fix.t > 10000) return;
   if (!force && Date.now() - lastPointAt < AUTO_POINT_MS) return;
   lastPointAt = Date.now();
   (r.points = r.points || []).push([+fix.lat.toFixed(7), +fix.lng.toFixed(7), Math.round(fix.t / 1000), Math.round(fix.acc), r.cur]);
   save(); renderPoints();
 }
+window.__maybeAutoPoint = maybeAutoPoint; // exposed for testing
 function renderPoints(){
   pointLayer.clearLayers();
   var r = active(); if (!r || !r.points) return;
@@ -1261,6 +1265,11 @@ function undoLast(){
 /* Makes sure there is a round and a live hole to log into. Returns null if the golfer cancels. */
 function ensureHole(snap){
   var r = active();
+  if (r && r.ended){
+    if (confirm('This round was ended ' + niceDate(r.ended) + '.\n\nOK = start a new round, Cancel = add to that one and pick it back up.')){
+      r = newRound(''); snap.newRound = true; if (plan) planKey = holeKey(); renderHole(false);
+    } else { resumeRound(r, true); }
+  }
   if (r && !r.keepOpen && Date.now() - r.started > 12 * 3600 * 1000){
     if (confirm('The current round started ' + niceDate(r.started) + '. Start a new round?\n\nOK = new round, Cancel = keep adding to the old one.')){
       r = newRound(''); snap.newRound = true; if (plan) planKey = holeKey(); renderHole(false);
@@ -2424,6 +2433,35 @@ function openScorecard(r){
   el.querySelector('#close').onclick = function(){ closeSheet(); };
 }
 window.__openScorecard = openScorecard;
+
+/* ---------- ending a round ----------
+   Until a round is ended the app keeps dropping a breadcrumb every minute whenever it is open,
+   which is how a drive home ends up in a round. Ending stops that, stops anything else being
+   added, and shows you the card. */
+function endRound(r){
+  if (!r) return false;
+  if (r.ended){ toast('That round has already been ended.'); return false; }
+  var open = r.holes.filter(function(h){ return h.shots.length && !h.green; }).length;
+  if (!confirm('End this round?' +
+      (open ? '\n\n' + open + ' hole' + (open === 1 ? ' has' : 's have') + ' no score yet. You can still fill ' +
+              (open === 1 ? 'it' : 'them') + ' in afterwards from the Scorecard.' : '') +
+      '\n\nThe app stops following you and stops adding to this round.')) return false;
+  r.ended = Date.now();
+  if (S.playingId === r.id) S.playingId = null;
+  if (plan) endPlan(true);
+  if (trailDirty){ trailDirty = false; saveTrail(r); }
+  save(); renderHole(false);
+  openSummary(r);
+  return true;
+}
+function resumeRound(r, quiet){
+  if (!r) return;
+  delete r.ended;
+  S.playingId = r.id; r.lastAt = Date.now();
+  save(); renderHole(false);
+  if (!quiet) toast('Round picked back up');
+}
+window.__endRound = endRound; window.__resumeRound = resumeRound;
 function download(name, text, type){
   var blob = new Blob([text], {type:type}), a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
@@ -2445,7 +2483,7 @@ function openRounds(){
     var rl = el.querySelector('#rl');
     if (!S.rounds.length){ rl.innerHTML = '<div class="note">No rounds yet.</div>'; return; }
     rl.innerHTML = S.rounds.map(function(r, idx){
-      return '<div class="ritem"><div class="rt">' + esc(r.course || 'Untitled course') + (r.id === S.activeId ? '<span class="tag">CURRENT</span>' : '') + '</div>' +
+      return '<div class="ritem"><div class="rt">' + esc(r.course || 'Untitled course') + (r.id === S.activeId ? '<span class="tag">CURRENT</span>' : '') + (r.ended ? '<span class="tag">ENDED</span>' : '') + '</div>' +
         '<div class="rs">' + niceDate(r.started) + ' · ' + roundSummary(r) + '</div>' +
         '<div class="rb"><button data-a="open" data-i="' + idx + '">Open</button><button data-a="csv" data-i="' + idx + '">CSV</button><button data-a="del" data-i="' + idx + '">Delete</button></div></div>';
     }).join('');
@@ -2516,6 +2554,7 @@ function openMenu(){
     '<button id="mReview">Review this round</button>' +
     '<button id="mStats">Club distances</button>' +
     '<button id="mOffline">Offline maps</button>' +
+    '<button id="mEnd"' + (r ? '' : ' hidden') + '>' + (r && r.ended ? 'Pick this round back up' : 'End round') + '</button>' +
     '<button id="mScore"' + (r ? '' : ' hidden') + '>Scorecard</button>' +
     '<button id="mSummary"' + (r ? '' : ' hidden') + '>Round card</button>' +
     '<button id="mCard">Export round cards (CSV)</button>' +
@@ -2545,6 +2584,7 @@ function openMenu(){
   el.querySelector('#mReview').onclick = function(){ closeSheet(true); openReview(); };
   el.querySelector('#mOffline').onclick = function(){ closeSheet(true); openOffline(); };
   el.querySelector('#mSettings').onclick = function(){ closeSheet(true); openSettings(); };
+  if (r) el.querySelector('#mEnd').onclick = function(){ closeSheet(true); if (r.ended) resumeRound(r); else endRound(r); };
   if (r) el.querySelector('#mScore').onclick = function(){ closeSheet(true); openScorecard(r); };
   if (r) el.querySelector('#mSummary').onclick = function(){ closeSheet(true); openSummary(r); };
   el.querySelector('#mCard').onclick = function(){ download('round-cards-' + isoDate(Date.now()) + '.csv', toCardCSV(S.rounds), 'text/csv'); };
