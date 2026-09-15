@@ -1,5 +1,5 @@
 /* Shot Tracker service worker: keeps the app and saved satellite imagery available offline. */
-var APP_CACHE = 'st-app-v13';
+var APP_CACHE = 'st-app-v14';
 var USGS_CACHE = 'st-tiles-usgs-v1';
 var MAPBOX_CACHE = 'st-tiles-mapbox-v1';
 var MAPBOX_TTL_MS = 30 * 24 * 3600 * 1000; // Mapbox terms: on-device cache limited to 30 days

@@ -144,15 +144,28 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
 .flag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid #d32f2f;color:#d32f2f;font-weight:900;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.slog .sl{display:flex;gap:10px;width:100%;text-align:left;border:1px solid var(--line);border-radius:12px;padding:9px 10px;margin-bottom:7px;background:#fff;align-items:flex-start}
+.slog .sl.aimed{border-color:#f0c48a}
+.slog .slh{flex:none;min-width:46px;height:34px;border-radius:9px;background:#f2f5f2;color:var(--g2);font-weight:900;font-size:13px;display:flex;align-items:center;justify-content:center}
+.slog .slb{flex:1;min-width:0}
+.slog .sl1{display:block;font-size:16px;font-weight:800;line-height:1.25}
+.slog .sl1 .yd{font-size:19px}
+.slog .sl1 .open{color:var(--mut);font-weight:700}
+.slog .sl2{display:block;font-size:12.5px;color:#a3712a;font-weight:700;margin-top:3px;line-height:1.3}
+.slog .sl2.out{color:#b0561f}
+.slog .sl3{display:block;font-size:12px;color:var(--mut);font-weight:600;margin-top:3px;line-height:1.3}
+.slog .hd{font-weight:900;font-size:14px;margin:12px 0 6px;color:var(--g2)}
+.slog .hd span{color:var(--mut);font-weight:700}
+.slogSum{font-size:13px;color:var(--mut);font-weight:600;margin:-2px 0 8px}
 .stp{display:flex;align-items:center;gap:8px;padding:5px 0}
 .stp .lbl{flex:1;font-size:14px;font-weight:700}
-.stp button{width:38px;height:38px;border-radius:10px;border:2px solid var(--ln);background:#fff;font-size:19px;font-weight:900;line-height:1}
+.stp button{width:38px;height:38px;border-radius:10px;border:2px solid var(--line);background:#fff;font-size:19px;font-weight:900;line-height:1}
 .stp b{min-width:26px;text-align:center;font-size:17px;font-weight:900}
 .stp.on .lbl{color:var(--g2)}
-.putt{border:1px solid var(--ln);border-radius:12px;padding:8px 10px;margin:6px 0;background:#fafbfa}
+.putt{border:1px solid var(--line);border-radius:12px;padding:8px 10px;margin:6px 0;background:#fafbfa}
 .putt .ph{display:flex;align-items:center;gap:8px;margin-bottom:2px}
 .putt .ph b{font-size:14px;flex:none}
-.putt .ph input{width:76px;padding:8px;border:2px solid var(--ln);border-radius:10px;font-size:15px;font-weight:700}
+.putt .ph input{width:76px;padding:8px;border:2px solid var(--line);border-radius:10px;font-size:15px;font-weight:700}
 .putt .ph .rm{margin-left:auto}
 .putt .chips{margin:2px 0}
 .putt .chip{padding:6px 9px;font-size:13px}
@@ -304,7 +317,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.7.0', SCHEMA = 5;
+var APP_VERSION = '1.8.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -1379,6 +1392,39 @@ function showResult(o){
   layout();
 }
 
+/* Editing one shot: the club, how it was struck, where it missed, or moving the marker. */
+function openShotEdit(h, i){
+  var s = h.shots[i], d = shotDistYd(h, i);
+  var clubs = S.settings.clubs.slice(); if (s.club && clubs.indexOf(s.club) < 0) clubs.unshift(s.club); if (!s.club) clubs.unshift('(not set)');
+  var el = openSheet(
+    '<h3>Hole ' + h.n + ' · Shot ' + (i+1) + '</h3>' +
+    '<div class="sub">' + (d != null ? r0(d) + ' yd total (GPS, to ' + shotEnd(h,i).type + ')' : 'Distance pending: set by your next shot or ON GREEN') +
+      ' · GPS ±' + r0(yd(s.acc || 0)) + ' yd (phone estimate)' + (s.moved ? ' · moved by hand' : '') + (s.stale ? ' · recorded from a ' + s.ageS + ' s old fix' : '') + (s.weak ? ' · weak GPS' : '') + '</div>' +
+    (s.plan ? '<div class="sub"><b>Plan:</b> aimed ' + r0(yd(distM(s, s.plan))) + ' yd with ' + esc(s.plan.club) + ' · pattern ' + patText(s.plan) +
+      (planResultFor(h, i) ? '<br><b>Result vs aim:</b> ' + missText(planResultFor(h, i)) + (planResultFor(h, i).inside ? ' · inside pattern' : ' · outside pattern') : '<br>Result vs aim appears after your next shot.') +
+      ' <button class="link" id="dropPlan">Remove plan</button></div>' : '') +
+    '<label class="fl">Club<select id="club">' + clubs.map(function(c){ return '<option' + ((c === s.club || (!s.club && c === '(not set)')) ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select></label>' +
+    '<div class="fl">Lie</div><div class="chips" id="lieC"></div>' +
+    '<div class="fl">Strike</div><div class="chips" id="stC"></div>' +
+    '<div class="fl">Miss</div><div class="chips" id="msC"></div>' +
+    '<label class="chk"><input type="checkbox" id="ex"' + (s.excluded ? ' checked' : '') + '> Exclude from club stats</label>' +
+    '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="del">Delete shot</button></div>' +
+    '<div class="stack"><button class="btn pri" id="done">Done</button></div>',
+    function(){ save(); renderHole(false); });
+  el.querySelector('#club').onchange = function(e){ s.club = e.target.value === '(not set)' ? null : e.target.value; save(); };
+  chips(el.querySelector('#lieC'), LIES, function(){ return s.lie || null; }, function(v){ s.lie = v; save(); });
+  chips(el.querySelector('#stC'), STRIKES, function(){ return s.strike || null; }, function(v){ s.strike = v; save(); });
+  missChips(el.querySelector('#msC'), function(){ return s.miss || []; }, function(v){ s.miss = v; save(); });
+  el.querySelector('#ex').onchange = function(e){ s.excluded = e.target.checked; save(); };
+  if (s.plan) el.querySelector('#dropPlan').onclick = function(){ if (confirm('Remove the aim point from this shot?')){ delete s.plan; save(); closeSheet(true); renderHole(false); } };
+  el.querySelector('#move').onclick = function(){ closeSheet(true); renderHole(false); enableMove(s.id, s); };
+  el.querySelector('#del').onclick = function(){
+    if (!confirm('Delete shot ' + (i+1) + ' (' + s.club + ')?')) return;
+    h.shots.splice(i, 1); save(); closeSheet(true); renderHole(false); toast('Shot deleted');
+  };
+  el.querySelector('#done').onclick = function(){ closeSheet(); };
+}
+
 /* ---------- finishing a hole: the whole story ---------- */
 function onGreen(){
   keepAwake();
@@ -2188,6 +2234,95 @@ function openSummary(r){
   el.querySelector('#close').onclick = function(){ closeSheet(); };
 }
 window.__openSummary = openSummary;
+
+/* ---------- every shot, as a list ----------
+   The map shows one hole at a time; this is the round end to end. Distance is what the GPS
+   measured between this shot and the next, the club is what you tapped, and where an aim was
+   set it says how far from it the ball finished. */
+function shotLog(r){
+  var out = [];
+  (r ? r.holes : []).forEach(function(h, hi){
+    h.shots.forEach(function(sh, si){
+      out.push({hi:hi, si:si, n:h.n, h:h, s:sh, d:shotDistYd(h, si), pr:planResultFor(h, si),
+                aimYd:sh.plan ? yd(distM(sh, sh.plan)) : null});
+    });
+  });
+  return out;
+}
+window.__shotLog = shotLog;
+function openShotLog(r){
+  if (!r){ toast('No round open. Open one from Rounds first.'); return; }
+  var all = shotLog(r);
+  if (!all.length){ toast('No shots recorded in this round yet.'); return; }
+  var clubs = [];
+  all.forEach(function(x){ if (x.s.club && clubs.indexOf(x.s.club) < 0) clubs.push(x.s.club); });
+  var pick = null;
+  var el = openSheet(
+    '<h3>Every shot</h3>' +
+    '<div class="sub">' + esc(r.course || 'This round') + ' · tap a shot to see it on the map and edit it.</div>' +
+    (clubs.length > 1 ? '<div class="chips" id="slClubs"></div>' : '') +
+    '<div class="slogSum" id="slSum"></div>' +
+    '<div class="slog" id="slList"></div>' +
+    '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+
+  function rows(){
+    var list = pick ? all.filter(function(x){ return x.s.club === pick; }) : all;
+    var sum = $('#slSum'), box = $('#slList');
+    var meas = list.filter(function(x){ return x.d != null && !x.s.excluded; }).map(function(x){ return x.d; }).sort(function(a, b){ return a - b; });
+    var med = meas.length ? meas[Math.floor((meas.length - 1) / 2)] : null;
+    sum.textContent = list.length + ' shot' + (list.length === 1 ? '' : 's') +
+      (meas.length ? ' · ' + meas.length + ' measured · median ' + r0(med) + ' yd · longest ' + r0(meas[meas.length - 1]) + ' yd' : ' · none measured yet') +
+      (pick ? '' : ' · ' + all.filter(function(x){ return x.s.plan; }).length + ' with an aim set');
+    var html = '', lastHole = null;
+    list.forEach(function(x, idx){
+      if (x.n !== lastHole){
+        lastHole = x.n;
+        var sc = holeScore(x.h);
+        html += '<div class="hd">Hole ' + x.n + (sc != null && x.h.green ? ' <span>· ' + sc + ' strokes</span>' : '') + '</div>';
+      }
+      var s2 = '';
+      if (x.pr) s2 = 'aim ' + r0(x.aimYd) + ' yd \u2192 ' + missText(x.pr) + ' · ' + (x.pr.inside ? 'inside' : 'outside') + ' pattern';
+      else if (x.aimYd != null) s2 = 'aim ' + r0(x.aimYd) + ' yd · where it finished is not recorded';
+      var tags = [];
+      // the two shapes of bad data this round taught us to look for
+      if (x.d != null && x.d < 5 && x.si > 0) tags.push('same spot as the shot before');
+      if (x.d != null && x.d > 400) tags.push('that distance looks wrong');
+      if (x.s.lie) tags.push(x.s.lie);
+      if (x.s.strike) tags.push(x.s.strike);
+      if (x.s.miss && x.s.miss.length) tags.push('miss ' + x.s.miss.join(' + '));
+      if (x.s.excluded) tags.push('excluded');
+      if (x.s.moved) tags.push('moved by hand');
+      if (x.s.weak) tags.push('weak GPS');
+      if (x.s.stale) tags.push('old fix');
+      tags.push('\u00b1' + r0(yd(x.s.acc || 0)) + ' yd');
+      html += '<button class="sl' + (x.pr ? ' aimed' : '') + '" data-i="' + idx + '">' +
+        '<span class="slh">' + x.n + '·' + (x.si + 1) + '</span><span class="slb">' +
+        '<span class="sl1">' + (x.d == null ? '<span class="open">not measured</span>' : '<span class="yd">' + r0(x.d) + ' yd</span>') +
+        '  ' + esc(x.s.club || 'club not set') + '</span>' +
+        (s2 ? '<span class="sl2' + (x.pr && !x.pr.inside ? ' out' : '') + '">' + esc(s2) + '</span>' : '') +
+        '<span class="sl3">' + esc(tags.join(' · ')) + '</span>' +
+        '</span></button>';
+    });
+    box.innerHTML = html;
+    Array.prototype.forEach.call(box.querySelectorAll('.sl'), function(b){
+      b.onclick = function(){
+        var x = list[+b.dataset.i];
+        closeSheet(true);
+        r.cur = x.hi; save(); renderHole(true);
+        var pts = [[x.s.lat, x.s.lng]];
+        if (x.s.plan) pts.push([x.s.plan.lat, x.s.plan.lng]);
+        var e = shotEnd(x.h, x.si); if (e) pts.push([e.pt.lat, e.pt.lng]);
+        if (pts.length > 1){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); }
+        else map.setView(pts[0], 18);
+        openShotEdit(x.h, x.si);
+      };
+    });
+  }
+  if (clubs.length > 1) chips($('#slClubs'), clubs, function(){ return pick; }, function(v){ pick = v; rows(); });
+  rows();
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+window.__openShotLog = openShotLog;
 function download(name, text, type){
   var blob = new Blob([text], {type:type}), a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
@@ -2276,6 +2411,7 @@ function openMenu(){
     '<button id="mCourse"' + (r ? '' : ' hidden') + '>Rename course</button>' +
     '<button id="mGreen"' + (r && curHole() ? '' : ' hidden') + '>Green for this hole</button>' +
     '<button id="mRounds">Rounds</button>' +
+    '<button id="mShots">Every shot</button>' +
     '<button id="mReview">Review this round</button>' +
     '<button id="mStats">Club distances</button>' +
     '<button id="mOffline">Offline maps</button>' +
@@ -2303,6 +2439,7 @@ function openMenu(){
   el.querySelector('#mGreen').onclick = function(){ var h = curHole(); closeSheet(true); if (h) openCourseGreen(h); };
   el.querySelector('#mRounds').onclick = function(){ closeSheet(true); openRounds(); };
   el.querySelector('#mStats').onclick = function(){ closeSheet(true); openStats(); };
+  el.querySelector('#mShots').onclick = function(){ closeSheet(true); openShotLog(active()); };
   el.querySelector('#mReview').onclick = function(){ closeSheet(true); openReview(); };
   el.querySelector('#mOffline').onclick = function(){ closeSheet(true); openOffline(); };
   el.querySelector('#mSettings').onclick = function(){ closeSheet(true); openSettings(); };
