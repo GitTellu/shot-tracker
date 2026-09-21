@@ -369,7 +369,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.13.0', SCHEMA = 5;
+var APP_VERSION = '1.14.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -591,7 +591,7 @@ function onPos(p, requested){
   var ll = [fix.lat, fix.lng];
   youDot.setLatLng(ll); accCircle.setLatLng(ll).setRadius(fix.acc);
   if (!map.hasLayer(youDot)){ accCircle.addTo(map); youDot.addTo(map); }
-  if (firstFix){ firstFix = false; if (!(greenFor(curHole()) && fitHole())) map.setView(ll, 18); }
+  if (firstFix){ firstFix = false; if (!(greenFor(curHole()) && fitHole())) map.setView(ll, 18); } // fitHole shows the hole, not the sofa, when you are away
   else if (follow){ map.panTo(ll, {animate:true}); }
 
   var r = active();
@@ -857,17 +857,17 @@ function updateAutoBearing(force){
   if (!force && diff < 5) return;
   lastAutoAt = Date.now(); bearing = b; applyRotation();
 }
-function setRotation(mode){
+function setRotation(mode, quiet){
   rotMode = mode;
-  if (mode === 'north'){ bearing = 0; applyRotation(); toast('Map facing north'); return; }
-  if (mode === 'free'){ applyRotation(); toast('Free spin: twist with two fingers to turn the map', 3500); return; }
+  if (mode === 'north'){ bearing = 0; applyRotation(); if (!quiet) toast('Map facing north'); return; }
+  if (mode === 'free'){ applyRotation(); if (!quiet) toast('Free spin: twist with two fingers to turn the map', 3500); return; }
   var b = autoBearing();
   if (b == null){ // nothing to point at yet, so let the golfer spin it by hand instead of refusing
     rotMode = 'free'; applyRotation();
-    toast('Twist with two fingers to line the hole up, then set your aim', 4500); return;
+    if (!quiet) toast('Twist with two fingers to line the hole up, then set your aim', 4500); return;
   }
   bearing = b; lastAutoAt = Date.now(); applyRotation();
-  toast('Map turned so your shot plays up the screen');
+  if (!quiet) toast('Map turned so your shot plays up the screen');
 }
 function cycleRotation(){ setRotation(rotMode === 'north' ? 'auto' : (rotMode === 'auto' ? 'free' : 'north')); }
 window.__mousePos = function(x, y){ var pt = map.mouseEventToContainerPoint({clientX:x, clientY:y}); return {x:pt.x, y:pt.y}; };
@@ -1003,6 +1003,7 @@ function startPlaceGreen(){
   if (!h){ toast('Start a round first'); return; }
   if (plan) endPlan(true);
   var g = greenFor(h);
+  follow = false;   // nothing should move the map while you are aiming at a green
   placing = {n:h.n, pt:g ? {lat:g.lat, lng:g.lng} : null, marker:null};
   if (placing.pt) placeGreenMarker(placing.pt);
   $('#tgtBar').hidden = false;
@@ -1032,7 +1033,10 @@ function saveGreen(){
   if (!c){ toast('Start a round first'); return; }
   c.greens[placing.n] = {lat:+placing.pt.lat.toFixed(7), lng:+placing.pt.lng.toFixed(7), t:Date.now()};
   var n = placing.n;
-  save(); endPlaceGreen(); fitHole();
+  // deliberately no re-framing: you are probably placing the next one. Stop following the phone
+  // though, or the map creeps back to it a metre at a time on every fix.
+  follow = false;
+  save(); endPlaceGreen();
   toast('Green saved for hole ' + n + ' at ' + esc(c.name) + '. Every round here will use it.', 4000);
 }
 function openCourseGreen(h){
@@ -1053,16 +1057,39 @@ function openCourseGreen(h){
   el.querySelector('#close').onclick = function(){ closeSheet(); };
 }
 
+/* Greens get placed from the sofa, days before the round. When the phone is nowhere near the
+   course, pulling the map back to it is wrong twice over: it loses the place you had scrolled to,
+   and fitting you and a green forty miles apart zooms out to the whole county. Answers false
+   unless greens exist for this course and the phone is genuinely far from all of them, so a round
+   with no greens yet behaves exactly as it always did. */
+var AT_COURSE_M = 1200;
+function awayFromCourse(){
+  if (!fix) return false;
+  var c = courseFor(false); if (!c || !c.greens) return false;
+  var ks = Object.keys(c.greens); if (!ks.length) return false;
+  for (var i = 0; i < ks.length; i++) if (distM(fix, c.greens[ks[i]]) < AT_COURSE_M) return false;
+  return true;
+}
+window.__awayFromCourse = awayFromCourse;
+
 /* Scale: fit you, the green and any aim target on screen. Never while you are following yourself
    with the recentre button, never within 10 s of touching the map, and only once the distance has
    really changed - otherwise the map would re-zoom under your thumb on every GPS tick. */
 var autoFitAt = 0, autoFitD = null, mapTouchedAt = 0;
 function fitHole(){
-  var h = curHole(), g = greenFor(h), pts = [];
-  if (fix) pts.push([fix.lat, fix.lng]);
+  var h = curHole(), g = greenFor(h), pts = [], away = awayFromCourse();
+  if (fix && !away) pts.push([fix.lat, fix.lng]);
   if (g) pts.push([g.lat, g.lng]);
   if (plan) pts.push([plan.aim.lat, plan.aim.lng]);
-  if (pts.length < 2) return false;
+  if (pts.length < 2){
+    if (away && g){ // show the hole, not the sofa
+      follow = false;
+      map.setView([g.lat, g.lng], Math.max(map.getZoom(), 16));
+      autoFitAt = Date.now(); autoFitD = null;
+      return true;
+    }
+    return false;
+  }
   follow = false;
   map.fitBounds(pts, {padding:fitPadding(), maxZoom:19});
   autoFitD = (g && fix) ? distM(fix, g) : null; autoFitAt = Date.now();
@@ -1070,7 +1097,7 @@ function fitHole(){
   return true;
 }
 function maybeAutoFit(){
-  if (follow || placing || aimDragging || !fix || !booted) return;
+  if (follow || placing || aimDragging || !fix || !booted || awayFromCourse()) return;
   var g = greenFor(curHole()); if (!g) return;
   if (Date.now() - mapTouchedAt < 10000 || Date.now() - autoFitAt < 8000) return;
   var d = distM(fix, g);
@@ -1239,12 +1266,15 @@ function renderHole(fit){
       markers.cgreen = cm;
     }
     if (fit){
+      var away = awayFromCourse();
       var pts = h.shots.map(function(s){ return [s.lat, s.lng]; });
       if (greenPos(h)) pts.push([h.green.lat, h.green.lng]);
       if (cg) pts.push([cg.lat, cg.lng]);
-      if (fix && (cg || !greenPos(h))) pts.push([fix.lat, fix.lng]);
+      if (fix && !away && (cg || !greenPos(h))) pts.push([fix.lat, fix.lng]);
       if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); autoFitAt = Date.now(); autoFitD = (cg && fix) ? distM(fix, cg) : null; }
-      else if (fix){ follow = true; map.setView([fix.lat, fix.lng], 18); }
+      else if (pts.length === 1 && away){ follow = false; map.setView(pts[0], Math.max(map.getZoom(), 16)); }
+      else if (fix && !away){ follow = true; map.setView([fix.lat, fix.lng], 18); }
+      // away from the course with nothing on this hole yet: leave the map exactly where you left it
     }
   }
   updateLive(); drawPlan(); renderPoints(); relabel();
@@ -1795,21 +1825,29 @@ function suggestClub(yards){
 function startPlan(){
   var st = planStart();
   if (!st){ toast('Waiting for GPS. Planning measures from where you are standing.'); return; }
-  // First aim guess: map centre if it is a sensible distance away, otherwise a point up-screen.
-  var c = map.getCenter(), aim = {lat:c.lat, lng:c.lng};
-  if (yd(distM(st, aim)) < 30){
-    var sz = map.getSize ? map.getSize() : {x:390, y:560};
-    var p = map.containerPointToLatLng ? map.containerPointToLatLng([sz.x / 2, sz.y * 0.2]) : null;
-    if (p) aim = {lat:p.lat, lng:p.lng};
+  var h = curHole(), g = greenFor(h), aim;
+  if (g){
+    aim = {lat:g.lat, lng:g.lng};   // the green is what you are playing to until you say otherwise
+  } else {
+    // no green placed: the map centre if it is a sensible distance away, otherwise a point up-screen
+    var c = map.getCenter(); aim = {lat:c.lat, lng:c.lng};
+    if (yd(distM(st, aim)) < 30){
+      var sz = map.getSize ? map.getSize() : {x:390, y:560};
+      var p = map.containerPointToLatLng ? map.containerPointToLatLng([sz.x / 2, sz.y * 0.2]) : null;
+      if (p) aim = {lat:p.lat, lng:p.lng};
+    }
   }
-  var h = curHole(), last = S.settings.clubs[0];
+  var last = S.settings.clubs[0];
   plan = {aim:aim, club:(h && h.shots.length) ? S.settings.clubs[Math.min(6, S.settings.clubs.length - 1)] : last, pat:null};
   var sug = suggestClub(yd(distM(st, aim))); if (sug) plan.club = sug.club;
   plan.pat = patYards(patternFor(plan.club));
   follow = false; planKey = holeKey();
   $('#planBtn').classList.add('on'); $('#planBtn').textContent = 'CANCEL'; $('#statusLine').hidden = true;
+  if (g) setRotation('auto', true);   // turn the hole to run up the screen; our own toast says so
   renderPlanBox(!plan.club); drawPlan(); updateAutoBearing(true);
-  toast('Drag the target, or tap the map, to set your aim.', 3500);
+  if (g) fitHole();
+  toast(g ? 'Aimed at the centre of the green, hole running up the screen. Drag the target to change it.'
+          : 'Drag the target, or tap the map, to set your aim.', 3500);
 }
 function holeKey(){ var r = active(); return (S.activeId || '') + ':' + (r ? r.cur : ''); }
 function endPlan(silent){
