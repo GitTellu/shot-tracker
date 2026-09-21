@@ -220,10 +220,17 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .scoreline{font-size:13px;color:var(--mut);font-weight:600;margin-top:2px}
 .gflag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid var(--g2);color:var(--g2);font-weight:900;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .gflag.set{background:var(--g2);color:#fff}
-#tgtBar{position:fixed;left:8px;right:8px;z-index:2400;background:#111;color:#fff;border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 2px 14px rgba(0,0,0,.4)}
-#tgtBar .t{flex:1;font-size:13px;font-weight:700;line-height:1.25}
-#tgtBar button{border:0;border-radius:10px;padding:9px 12px;font-weight:800;font-size:14px}
-#tgtSave{background:var(--g);color:#fff}#tgtCancel{background:#333;color:#fff}
+#tgtBar{position:fixed;left:8px;right:8px;z-index:2400;background:#0E1512;color:#fff;border-radius:16px;padding:10px 12px 11px;box-shadow:0 2px 16px rgba(0,0,0,.42)}
+.tgtTop{display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
+#tgtBar .t{flex:1;font-size:13px;font-weight:700;line-height:1.3}
+.tgtCount{flex:none;font-size:11px;font-weight:800;letter-spacing:.8px;color:rgba(255,255,255,.62);white-space:nowrap}
+.tgtRow{display:flex;align-items:center;gap:8px}
+#tgtBar button{border:0;border-radius:11px;padding:11px 14px;font-weight:800;font-size:15px;transition:transform .12s var(--ease)}
+#tgtBar button:active{transform:scale(.95)}
+#tgtBar .tgtNav{flex:none;width:44px;padding:11px 0;background:rgba(255,255,255,.14);color:#fff;font-size:20px;line-height:1}
+#tgtBar .tgtNav:disabled{opacity:.35}
+#tgtSave{flex:1;background:var(--g2);color:#fff}
+#tgtDone{flex:none;background:rgba(255,255,255,.14);color:#fff}
 /* The pill is the inner span, not the tooltip box: the box carries Leaflet's own positioning, and
    turning the box instead would spin it about the pane's origin and throw it off the screen. */
 .leaflet-tooltip.dtip{background:none;border:0;box-shadow:none;padding:0;color:#fff;font-weight:800;font-size:13px}
@@ -252,7 +259,14 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
   <button id="centerBtn" class="ib" aria-label="Center on me" title="Center on me">&#9678;</button>
 </div>
 
-<div id="tgtBar" hidden><div class="t" id="tgtText"></div><button id="tgtCancel">Cancel</button><button id="tgtSave">Save</button></div>
+<div id="tgtBar" hidden>
+  <div class="tgtTop"><div class="t" id="tgtText"></div><div class="tgtCount" id="tgtCount"></div></div>
+  <div class="tgtRow">
+    <button id="tgtPrev" class="tgtNav" aria-label="Previous hole">&#8249;</button>
+    <button id="tgtNext" class="tgtNav" aria-label="Next hole">&#8250;</button>
+    <button id="tgtDone">Done</button><button id="tgtSave">Save</button>
+  </div>
+</div>
 
 <section id="panel">
   <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green &#9971;</button><button id="greenBtn" class="link" hidden>Finish hole &#9873;</button></div>
@@ -369,7 +383,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.14.0', SCHEMA = 5;
+var APP_VERSION = '1.15.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -998,17 +1012,55 @@ var greenPickIcon = L.divIcon({className:'', html:'<div class="gflag">&#9971;</d
 
 /* Placing: tap the centre of the green, drag to nudge, Save. */
 var placing = null;
-function startPlaceGreen(){
+/* Two ways in, and they want different things. Setting up a whole course walks you hole to hole;
+   coming to fix one green should put you back where you were, not march you on to hole 2. */
+function startPlaceGreen(setup){
   var h = curHole();
   if (!h){ toast('Start a round first'); return; }
   if (plan) endPlan(true);
-  var g = greenFor(h);
   follow = false;   // nothing should move the map while you are aiming at a green
-  placing = {n:h.n, pt:g ? {lat:g.lat, lng:g.lng} : null, marker:null};
-  if (placing.pt) placeGreenMarker(placing.pt);
   $('#tgtBar').hidden = false;
-  $('#tgtText').textContent = 'Hole ' + h.n + ': tap the centre of the green, then Save. Drag the marker to nudge it.';
+  enterPlacing(h, !!setup);
   renderHole(false); layout();
+}
+/* Aim at this hole's green, keeping the map exactly where it is. */
+function enterPlacing(h, setup){
+  var g = greenFor(h);
+  var wasSetup = setup == null ? !!(placing && placing.setup) : !!setup;
+  if (placing && placing.marker) map.removeLayer(placing.marker);
+  placing = {n:h.n, pt:g ? {lat:g.lat, lng:g.lng} : null, marker:null, setup:wasSetup};
+  if (placing.pt) placeGreenMarker(placing.pt);
+  drawTgtBar();
+}
+function greensPlaced(){
+  var c = courseFor(false);
+  return c && c.greens ? Object.keys(c.greens).length : 0;
+}
+function drawTgtBar(){
+  if (!placing) return;
+  var r = active(), g = greenFor(curHole()), setup = placing.setup;
+  $('#tgtText').textContent = 'Hole ' + placing.n + ': ' +
+    (g ? 'green already placed \u2014 tap or drag to move it.' : 'tap the centre of the green.') +
+    (setup && !greensPlaced() ? ' Save moves you on to the next hole.' : '');
+  $('#tgtCount').textContent = setup ? greensPlaced() + ' OF 18 PLACED' : '';
+  $('#tgtPrev').hidden = !setup; $('#tgtNext').hidden = !setup;
+  $('#tgtPrev').disabled = !r || r.cur <= 0;
+  $('#tgtDone').textContent = setup ? 'Done' : 'Cancel';
+  layout();
+}
+/* Step to another hole without letting anything re-frame the map. */
+function placeStep(d){
+  if (!placing) return;
+  var r = active(); if (!r) return;
+  var i = r.cur + d;
+  if (i < 0) return;
+  if (i >= r.holes.length){
+    var last = r.holes[r.holes.length - 1];
+    r.holes.push({n:nextN(last.n), shots:[], green:null});
+  }
+  r.cur = i; save();
+  enterPlacing(curHole());
+  renderHole(false);   // false: no fit, so the map does not move
 }
 function placeGreenMarker(ll){
   if (!placing) return;
@@ -1026,6 +1078,7 @@ function endPlaceGreen(){
   $('#tgtBar').hidden = true;
   renderHole(false); layout();
 }
+window.__placeStep = placeStep; window.__startPlaceGreen = startPlaceGreen;
 function saveGreen(){
   if (!placing) return;
   if (!placing.pt){ toast('Tap the centre of the green first'); return; }
@@ -1033,11 +1086,15 @@ function saveGreen(){
   if (!c){ toast('Start a round first'); return; }
   c.greens[placing.n] = {lat:+placing.pt.lat.toFixed(7), lng:+placing.pt.lng.toFixed(7), t:Date.now()};
   var n = placing.n;
-  // deliberately no re-framing: you are probably placing the next one. Stop following the phone
-  // though, or the map creeps back to it a metre at a time on every fix.
+  // deliberately no re-framing: you are on to the next one. Stop following the phone though, or
+  // the map creeps back to it a metre at a time on every fix.
   follow = false;
-  save(); endPlaceGreen();
-  toast('Green saved for hole ' + n + ' at ' + esc(c.name) + '. Every round here will use it.', 4000);
+  save();
+  var done = greensPlaced(), setup = placing.setup;
+  if (!setup){ endPlaceGreen(); toast('Green saved for hole ' + n + ' at ' + esc(c.name) + '. Every round here will use it.', 4000); return; }
+  if (done >= 18){ endPlaceGreen(); toast('All eighteen greens placed at ' + esc(c.name) + '.', 4000); return; }
+  placeStep(1);   // straight on to the next hole, map untouched
+  toast('Hole ' + n + ' saved \u00b7 ' + done + ' of 18', 1800);
 }
 function openCourseGreen(h){
   var c = courseFor(false), g = greenFor(h);
@@ -2897,6 +2954,7 @@ var ICONS = {
   stop:'<circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1.2"/>',
   play:'<circle cx="12" cy="12" r="9"/><path d="M10.2 8.4l6 3.6-6 3.6z"/>',
   flag:'<path d="M5.5 21V3.5M5.5 4h11l-2.2 3.2L16.5 11h-11"/>',
+  target:'<circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.8v3M12 19.2v3M1.8 12h3M19.2 12h3"/>',
   pencil:'<path d="M4 20h4.2L20.2 8 16 3.8 4 15.8V20z"/><path d="M14.5 5.5l4 4"/>',
   map:'<path d="M9 4.5L3 6.8v13.4l6-2.3 6 2.3 6-2.3V4.5l-6 2.3-6-2.3z"/><path d="M9 4.5v13.4M15 6.8v13.4"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.2 2"/>',
@@ -2939,6 +2997,7 @@ function openMenu(){
     ] : []) +
     mgrp('Course', r ? [
       curHole() ? mrow('mGreen', 'flag', 'Green for hole ' + curHole().n) : '',
+      mrow('mGreens', 'target', 'Set up all the greens'),
       mrow('mCourse', 'pencil', 'Rename course'),
       mrow('mOffline', 'map', 'Offline maps')
     ] : [mrow('mOffline', 'map', 'Offline maps')]) +
@@ -2973,6 +3032,12 @@ function openMenu(){
     save(); closeSheet(true);
   });
   on('mGreen', function(){ var h = curHole(); closeSheet(true); if (h) openCourseGreen(h); });
+  on('mGreens', function(){
+    closeSheet(true);
+    var rr = active(); if (rr){ rr.cur = 0; save(); renderHole(false); }
+    startPlaceGreen(true);
+    toast('Scroll to the course, then work through the holes. The map stays where you put it.', 5000);
+  });
   on('mRounds', function(){ closeSheet(true); openRounds(); });
   on('mStats', function(){ closeSheet(true); openStats(); });
   on('mShots', function(){ closeSheet(true); openShotLog(active()); });
@@ -3276,9 +3341,11 @@ $('#nextHole').onclick = function(){
 };
 $('#holeLabel').onclick = openHolePicker;
 $('#rotBtn').onclick = cycleRotation;
-$('#tgtBtn').onclick = startPlaceGreen;
+$('#tgtBtn').onclick = function(){ startPlaceGreen(false); };
 $('#tgtSave').onclick = saveGreen;
-$('#tgtCancel').onclick = endPlaceGreen;
+$('#tgtDone').onclick = endPlaceGreen;
+$('#tgtPrev').onclick = function(){ placeStep(-1); };
+$('#tgtNext').onclick = function(){ placeStep(1); };
 // any finger on the map means hands off the zoom for a while
 $('#mapWrap').addEventListener('pointerdown', function(){ mapTouchedAt = Date.now(); }, {passive:true, capture:true});
 $('#centerBtn').onclick = function(){ follow = true; if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); else toast('Waiting for GPS'); };
