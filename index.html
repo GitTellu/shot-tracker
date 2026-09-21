@@ -231,6 +231,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 #tgtBar .tgtNav:disabled{opacity:.35}
 #tgtSave{flex:1;background:var(--g2);color:#fff}
 #tgtDone{flex:none;background:rgba(255,255,255,.14);color:#fff}
+#tgtSweep{flex:none;background:rgba(255,255,255,.14);color:#fff;white-space:nowrap}
 /* The pill is the inner span, not the tooltip box: the box carries Leaflet's own positioning, and
    turning the box instead would spin it about the pane's origin and throw it off the screen. */
 .leaflet-tooltip.dtip{background:none;border:0;box-shadow:none;padding:0;color:#fff;font-weight:800;font-size:13px}
@@ -264,7 +265,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
   <div class="tgtRow">
     <button id="tgtPrev" class="tgtNav" aria-label="Previous hole">&#8249;</button>
     <button id="tgtNext" class="tgtNav" aria-label="Next hole">&#8250;</button>
-    <button id="tgtDone">Done</button><button id="tgtSave">Save</button>
+    <button id="tgtDone">Done</button><button id="tgtSweep">Save &amp; next &#8250;</button><button id="tgtSave">Save</button>
   </div>
 </div>
 
@@ -383,7 +384,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.15.0', SCHEMA = 5;
+var APP_VERSION = '1.16.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -1044,6 +1045,7 @@ function drawTgtBar(){
     (setup && !greensPlaced() ? ' Save moves you on to the next hole.' : '');
   $('#tgtCount').textContent = setup ? greensPlaced() + ' OF 18 PLACED' : '';
   $('#tgtPrev').hidden = !setup; $('#tgtNext').hidden = !setup;
+  $('#tgtSweep').hidden = setup;   // in setup mode plain Save already moves you on
   $('#tgtPrev').disabled = !r || r.cur <= 0;
   $('#tgtDone').textContent = setup ? 'Done' : 'Cancel';
   layout();
@@ -1079,7 +1081,9 @@ function endPlaceGreen(){
   renderHole(false); layout();
 }
 window.__placeStep = placeStep; window.__startPlaceGreen = startPlaceGreen;
-function saveGreen(){
+/* advance: "Save & next" from the one-off bar. Saves this green and turns the bar into the
+   sweep, so you can carry straight on without going back through the menu. */
+function saveGreen(advance){
   if (!placing) return;
   if (!placing.pt){ toast('Tap the centre of the green first'); return; }
   var c = courseFor(true);
@@ -1090,6 +1094,7 @@ function saveGreen(){
   // the map creeps back to it a metre at a time on every fix.
   follow = false;
   save();
+  if (advance === true) placing.setup = true;
   var done = greensPlaced(), setup = placing.setup;
   if (!setup){ endPlaceGreen(); toast('Green saved for hole ' + n + ' at ' + esc(c.name) + '. Every round here will use it.', 4000); return; }
   if (done >= 18){ endPlaceGreen(); toast('All eighteen greens placed at ' + esc(c.name) + '.', 4000); return; }
@@ -3342,7 +3347,8 @@ $('#nextHole').onclick = function(){
 $('#holeLabel').onclick = openHolePicker;
 $('#rotBtn').onclick = cycleRotation;
 $('#tgtBtn').onclick = function(){ startPlaceGreen(false); };
-$('#tgtSave').onclick = saveGreen;
+$('#tgtSave').onclick = function(){ saveGreen(false); };
+$('#tgtSweep').onclick = function(){ saveGreen(true); };
 $('#tgtDone').onclick = endPlaceGreen;
 $('#tgtPrev').onclick = function(){ placeStep(-1); };
 $('#tgtNext').onclick = function(){ placeStep(1); };
