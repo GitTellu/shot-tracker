@@ -57,6 +57,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 .actions .btn{font-size:16px;padding:0 4px;height:50px}
 #statusLine{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-height:38px}
+#grip{display:flex;align-items:center;justify-content:center;height:22px;margin:-10px 0 4px;touch-action:none;cursor:grab;-webkit-tap-highlight-color:transparent}
+#grip span{display:block;width:40px;height:4px;border-radius:99px;background:#D6DED9;transition:width .16s var(--ease),background .16s var(--ease)}
+#grip:active span{width:56px;background:#B9C6BF}
 #stMain{font-size:19px;font-weight:800;line-height:1.15}
 #stSub{font-size:13px;color:var(--mut);font-weight:600}
 #resultCard{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);z-index:2500;background:#fff;border-radius:18px;box-shadow:0 -2px 18px rgba(0,0,0,.35);padding:14px 16px calc(env(safe-area-inset-bottom) + 14px);max-height:80vh;overflow:auto}
@@ -77,11 +80,15 @@ button{font:inherit;color:inherit;cursor:pointer}
 .plan{background:#fff3e0;color:#8a4b00;border:2px solid #ff9800}
 .plan.on{background:#ff9800;color:#111}
 #planBox{margin-top:6px}
-.planHead{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow:hidden}
-.planHead .pnum{font-size:26px;white-space:nowrap}
-.planHead .chip{padding:8px 10px;font-size:15px;flex:none}
+.planHead{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+.planHead .pnum{font-size:26px;white-space:nowrap;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+#planClose{flex:none;font-size:20px;padding:6px 2px 6px 12px}
+.planCtl{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-top:8px}
+.planCtl .chip{padding:9px 11px;font-size:15px;flex:none}
+.planCtl .cchip{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #planClubs{margin-top:4px}
-#planSub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#planSub{line-height:1.35;margin-top:2px;height:2.7em;overflow:hidden;
+ display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .pnum{font-size:34px;font-weight:900;line-height:1.05}
 .psub{color:var(--mut);font-size:13px}
 .planRow{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:4px;font-size:14px;font-weight:700}
@@ -130,6 +137,25 @@ input[type=range]{width:100%;margin:8px 0}
 .mhead .mh2{font-size:13px;font-weight:600;color:rgba(255,255,255,.74);margin-top:3px}
 .mhead .btn{margin-top:13px;height:44px;font-size:15px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.24);box-shadow:none}
 .mlab{font-size:11px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:var(--mut);margin:18px 4px 7px}
+.mtiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.mtile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+ padding:14px 6px;background:#fff;border:1px solid var(--line);border-radius:var(--r2);
+ font-size:12.5px;font-weight:800;color:var(--ink);line-height:1.2;text-align:center;
+ box-shadow:var(--sh1);transition:transform .12s var(--ease)}
+.mtile:active{transform:scale(.96);background:var(--g3)}
+.mtile svg{flex:none;width:23px;height:23px;stroke:var(--g2);stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.mtile.warn svg{stroke:var(--gold)}
+.mtile.warn{color:var(--gold)}
+.msec{border:1px solid var(--line);border-radius:var(--r2);background:#fff;margin-top:8px;overflow:hidden}
+.msec>summary{display:flex;align-items:center;gap:10px;padding:14px;font-size:15px;font-weight:800;
+ color:var(--ink);cursor:pointer;list-style:none}
+.msec>summary::-webkit-details-marker{display:none}
+.msec>summary:after{content:"\203a";margin-left:auto;color:var(--mut);font-size:20px;font-weight:800;
+ transition:transform .18s var(--ease)}
+.msec[open]>summary:after{transform:rotate(90deg)}
+.msec[open]>summary{border-bottom:1px solid var(--line2)}
+.msec .mgrp{border:0;border-radius:0}
+.msec .mrow:last-child{border-bottom:0}
 .mgrp{background:#fff;border:1px solid var(--line);border-radius:var(--r2);overflow:hidden}
 .mrow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:13px 14px;border:0;border-bottom:1px solid var(--line2);background:none;font-size:16px;font-weight:700;color:var(--ink)}
 .mgrp .mrow:last-child{border-bottom:0}
@@ -272,21 +298,24 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 </div>
 
 <section id="panel">
+  <div id="grip" role="button" tabindex="0" aria-label="Collapse the panel for more map"><span></span></div>
   <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green &#9971;</button><button id="greenBtn" class="link" hidden>Finish hole &#9873;</button></div>
   <div id="planBox" hidden>
     <div class="planHead">
       <div id="planNum" class="pnum">— yd</div>
-      <button id="planClubBtn" class="chip cchip">Club</button>
-      <button id="planEdit" class="chip" title="Pattern">&#9881;</button>
-      <button id="pwMinus" class="chip" aria-label="Narrower">&minus;</button>
-      <button id="pwPlus" class="chip" aria-label="Wider">+</button>
-      <button id="planClose" class="link">&#10005;</button>
+      <button id="planClose" class="link" aria-label="Back, without planning">&#10005;</button>
     </div>
     <div class="psub" id="planSub"></div>
+    <div class="planCtl">
+      <button id="planClubBtn" class="chip cchip">Club</button>
+      <button id="planEdit" class="chip" title="Shot pattern">&#9881;</button>
+      <button id="pwMinus" class="chip" aria-label="Narrower pattern">&minus;</button>
+      <button id="pwPlus" class="chip" aria-label="Wider pattern">+</button>
+    </div>
     <div class="chips" id="planClubs" hidden></div>
-    <div class="row"><button id="markBtn" class="btn ghost">Just mark</button><button id="goBtn" class="btn pri">Go</button></div>
+    <button id="goBtn" class="btn pri" style="margin-top:12px">HIT IT</button>
   </div>
-  <div class="actions">
+  <div class="actions" id="actions">
     <button id="planBtn" class="btn plan">AIM</button>
     <button id="recBtn" class="btn pri">MARK BALL</button>
     <button id="holedBtn" class="btn pri" hidden>HOLED IT &#9873;</button>
@@ -387,8 +416,8 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.17.0', SCHEMA = 5;
-function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
+var APP_VERSION = '1.18.0', SCHEMA = 5;
+function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
   if (!j || j.v !== 1) return d;
@@ -748,7 +777,8 @@ function shotPhase(h, open){
 /* One primary button, and it is whatever you are about to do. */
 function renderActions(h){
   var pb = $('#planBtn'), rb = $('#recBtn'), hb = $('#holedBtn');
-  if (plan){ hb.hidden = true; pb.hidden = false; rb.hidden = false; return; }
+  $('#actions').hidden = !!plan;
+  if (plan) return;
   var green = phase === 'green' && h && h.shots.length;
   hb.hidden = !green;
   pb.hidden = !!green;
@@ -1311,6 +1341,19 @@ function relabel(){
 window.__declutter = declutter; window.__relabel = relabel;
 
 /* ---------- rendering ---------- */
+/* Peek: the status line folds away and the panel keeps only its buttons, for when you want
+   the map. Planning hides it too, because the plan box says all of the same things. */
+function applyPeek(){
+  var on = !!(S.settings && S.settings.peek);
+  $('#statusLine').hidden = on || !!plan;
+  $('#grip').setAttribute('aria-expanded', on ? 'false' : 'true');
+  layout();
+}
+function setPeek(on){
+  if (!!S.settings.peek === !!on) return;
+  S.settings.peek = !!on; save(); applyPeek();
+}
+window.__setPeek = setPeek;
 function layout(){
   var ph = $('#panel').offsetHeight;
   $('#mapWrap').style.bottom = Math.max(0, ph - 18) + 'px';
@@ -1953,17 +1996,18 @@ function startPlan(){
   var sug = suggestClub(yd(distM(st, aim))); if (sug) plan.club = sug.club;
   plan.pat = patYards(patternFor(plan.club));
   follow = false; planKey = holeKey();
-  $('#planBtn').classList.add('on'); $('#planBtn').textContent = 'CANCEL'; $('#statusLine').hidden = true;
+  $('#planBtn').classList.add('on'); $('#planBtn').textContent = 'CANCEL'; applyPeek();
   if (g) setRotation('auto', true);   // turn the hole to run up the screen; our own toast says so
   renderPlanBox(!plan.club); drawPlan(); updateAutoBearing(true);
   if (g) fitHole();
-  toast(g ? 'Aimed at the centre of the green, hole running up the screen. Drag the target to change it.'
-          : 'Drag the target, or tap the map, to set your aim.', 3500);
+  toast((g ? 'Aimed at the centre of the green, hole running up the screen. Drag the target to change it. '
+           : 'Drag the target, or tap the map, to set your aim. ') +
+        'HIT IT then marks your ball here and remembers the target.', 5000);
 }
 function holeKey(){ var r = active(); return (S.activeId || '') + ':' + (r ? r.cur : ''); }
 function endPlan(silent){
   plan = null; aimDragging = false; planKey = null; planLayer.clearLayers(); aimMarker = null;
-  $('#planBtn').classList.remove('on'); $('#planBtn').textContent = 'AIM'; $('#planBox').hidden = true; $('#statusLine').hidden = false;
+  $('#planBtn').classList.remove('on'); $('#planBtn').textContent = 'AIM'; $('#planBox').hidden = true; applyPeek();
   renderStatus();
   if (!silent) updateLive();
 }
@@ -2050,7 +2094,8 @@ function renderPlanInfo(){
   if (fix && Date.now() - fix.t > STALE_FIX_MS) sub.textContent = 'GPS is ' + Math.round((Date.now() - fix.t) / 1000) + ' s old';
   else {
     var lv = toGreenYd(plan.aim);
-    sub.textContent = (lv == null ? '' : 'leaves ' + r0(lv) + ' yd to the green · ') + patShort(plan.pat) + (sug ? ' · your ' + sug.club + ' median ' + r0(sug.median) + ' yd' : '');
+    sub.textContent = (lv == null ? '' : 'leaves ' + r0(lv) + ' yd to the green · ') + patShort(plan.pat)
+      + (sug ? ' · your ' + sug.club + ' median ' + r0(sug.median) + ' yd' : '');
   }
   Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){ b.classList.toggle('sug', !!sug && b.textContent === sug.club); });
 }
@@ -3027,6 +3072,16 @@ function mgrp(label, rows){
   rows = rows.filter(Boolean);
   return rows.length ? '<div class="mlab">' + label + '</div><div class="mgrp">' + rows.join('') + '</div>' : '';
 }
+/* What you reach for mid-round, as tiles you can hit without reading. */
+function mtile(id, ic, label, cls){
+  return '<button class="mtile' + (cls ? ' ' + cls : '') + '" id="' + id + '">' + icon(ic) + '<span>' + label + '</span></button>';
+}
+/* Everything else folds away, so the menu opens as one screen instead of a scroll. */
+function msec(id, label, rows){
+  rows = rows.filter(Boolean);
+  return rows.length ? '<details class="msec" id="' + id + '"><summary>' + label + '</summary>' +
+    '<div class="mgrp">' + rows.join('') + '</div></details>' : '';
+}
 function openMenu(){
   var r = active();
   var sc = r ? roundScore(r) : null;
@@ -3042,30 +3097,30 @@ function openMenu(){
         : 'No round in progress \u2014 start one to begin tracking') + '</div>' +
       '<button class="btn" id="mNew">New round</button>' +
     '</div>' +
-    mgrp('This round', r ? [
-      mrow('mScore', 'grid', 'Scorecard'),
-      mrow('mSummary', 'trophy', 'Round card'),
-      mrow('mShots', 'list', 'Every shot'),
-      mrow('mReview', 'wrench', 'Review and fix'),
-      mrow('mEnd', r.ended ? 'play' : 'stop', r.ended ? 'Pick this round back up' : 'End round', 'warn')
-    ] : []) +
-    mgrp('Course', r ? [
+    (r ? '<div class="mlab">This round</div><div class="mtiles">' + [
+      mtile('mScore', 'grid', 'Scorecard'),
+      mtile('mSummary', 'trophy', 'Round card'),
+      mtile('mShots', 'list', 'Every shot'),
+      mtile('mReview', 'wrench', 'Review'),
+      mtile('mEnd', r.ended ? 'play' : 'stop', r.ended ? 'Reopen round' : 'End round', 'warn')
+    ].join('') + '</div>' : '') +
+    msec('dCourse', 'Course', r ? [
       curHole() ? mrow('mGreen', 'flag', 'Green for hole ' + curHole().n) : '',
       mrow('mGreens', 'target', 'Set up all the greens'),
       mrow('mCourse', 'pencil', 'Rename course'),
       mrow('mOffline', 'map', 'Offline maps')
     ] : [mrow('mOffline', 'map', 'Offline maps')]) +
-    mgrp('History', [
+    msec('dHistory', 'History', [
       mrow('mRounds', 'clock', 'Rounds'),
       mrow('mStats', 'chart', 'Club distances')
     ]) +
-    mgrp('Your data', [
+    msec('dData', 'Your data', [
       mrow('mCard', 'down', 'Export round cards'),
       mrow('mCsv', 'down', 'Export every shot'),
       mrow('mBackup', 'down', 'Back up everything'),
       mrow('mRestore', 'up', 'Restore from a backup')
     ]) +
-    mgrp('App', [
+    msec('dApp', 'App', [
       mrow('mSettings', 'gear', 'Settings'),
       mrow('mGuide', 'info', 'About and how to use')
     ]) +
@@ -3371,7 +3426,6 @@ function openGuide(){
 /* ---------- wiring ---------- */
 $('#recBtn').onclick = onRecord;
 $('#goBtn').onclick = onPlanGo;
-$('#markBtn').onclick = onMarkOnly;
 $('#rcUndo').onclick = undoLast;
 $('#rcDone').onclick = hideResult;
 $('#rcPlan').onclick = function(){ hideResult(); if (!plan) startPlan(); };
@@ -3384,6 +3438,29 @@ $('#planEdit').onclick = function(){ if (plan) openPatternEdit(plan.club); };
 $('#planClubBtn').onclick = function(){ if (plan) renderPlanBox($('#planClubs').hidden); };
 $('#greenBtn').onclick = onGreen;
 $('#holedBtn').onclick = onGreen;
+/* Drag the grip down for more map, up to bring the line back. A tap does the same, so it
+   works for anyone who does not think to drag it. */
+(function(){
+  var g = $('#grip'), y0 = null, moved = false;
+  g.addEventListener('pointerdown', function(e){
+    y0 = e.clientY; moved = false;
+    if (g.setPointerCapture) { try { g.setPointerCapture(e.pointerId); } catch (err) {} }
+  });
+  g.addEventListener('pointermove', function(e){
+    if (y0 == null) return;
+    var dy = e.clientY - y0;
+    if (Math.abs(dy) < 18) return;
+    moved = true; y0 = null; setPeek(dy > 0);
+  });
+  g.addEventListener('pointerup', function(){
+    if (y0 != null && !moved) setPeek(!S.settings.peek);
+    y0 = null;
+  });
+  g.addEventListener('pointercancel', function(){ y0 = null; });
+  g.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' || e.key === ' '){ e.preventDefault(); setPeek(!S.settings.peek); }
+  });
+})();
 $('#menuBtn').onclick = openMenu;
 $('#prevHole').onclick = function(){ var r = active(); if (r && r.cur > 0){ r.cur--; save(); renderHole(true); } };
 $('#nextHole').onclick = function(){
@@ -3419,7 +3496,7 @@ $('#layerBtn').onclick = function(){
 /* ---------- boot ---------- */
 function startApp(){
   booted = true;
-  setBase(); layout(); renderHole(true);
+  setBase(); applyPeek(); renderHole(true);
   startGPS(); registerSW(); purgeExpired(); keepAwake();
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function(){});
 }
