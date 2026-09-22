@@ -73,6 +73,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .leaflet-control-attribution{background:rgba(255,255,255,.7)!important;color:var(--mut)!important;font-size:10px!important;line-height:1.5!important;padding:1px 6px!important;border-radius:8px 0 0 0}
 .leaflet-control-attribution a{color:var(--mut)!important;text-decoration:none}
 .ptdot{width:12px;height:12px;border-radius:50%;background:#1e88e5;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+.stdot{width:20px;height:20px;border-radius:50%;background:#1e88e5;border:3px solid #fff;
+ box-shadow:0 0 0 1px rgba(0,0,0,.35),0 0 0 6px rgba(30,136,229,.22)}
 .pill.lock{color:#fff;background:#0a7a33}
 .cchip{padding:3px 10px;font-size:15px;border-color:var(--g2);color:var(--g)}
 #lcClubs .chip{padding:10px 13px}
@@ -416,7 +418,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.19.0', SCHEMA = 5;
+var APP_VERSION = '1.20.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -658,7 +660,7 @@ function onPos(p, requested){
       trailLine.addLatLng(ll); trailDirty = true;
     }
   }
-  gpsPill(); updateLive(); maybeAutoPoint(); updateAutoBearing(); maybeAutoFit();
+  gpsPill(); updateLive(); maybeAutoPoint(); feedStop(); updateAutoBearing(); maybeAutoFit();
   if (plan && !aimDragging){ redrawShapeOnly(); renderPlanInfo(); }
 }
 function onErr(e){
@@ -870,22 +872,62 @@ function maybeAutoPoint(force){
   if (Date.now() - fix.t > 10000) return;
   if (!force && Date.now() - lastPointAt < AUTO_POINT_MS) return;
   lastPointAt = Date.now();
-  (r.points = r.points || []).push([+fix.lat.toFixed(7), +fix.lng.toFixed(7), Math.round(fix.t / 1000), Math.round(fix.acc), r.cur]);
-  save(); renderPoints();
+  addPoint(r, fix.lat, fix.lng, fix.t, fix.acc, r.cur, 0);
 }
+/* One point per place, not per minute. A second point within MERGE_YD of one already on this
+   hole is the same spot seen again, so it keeps the longer stand rather than adding clutter. */
+var MERGE_YD = 8;
+function addPoint(r, lat, lng, t, acc, holeIdx, dwellS){
+  r.points = r.points || [];
+  for (var i = 0; i < r.points.length; i++){
+    var p = r.points[i];
+    if (p[4] !== holeIdx) continue;
+    if (yd(distM({lat:p[0], lng:p[1]}, {lat:lat, lng:lng})) > MERGE_YD) continue;
+    if (dwellS > (p[5] || 0)){ p[0] = +lat.toFixed(7); p[1] = +lng.toFixed(7); p[3] = Math.round(acc); p[5] = Math.round(dwellS); }
+    save(); renderPoints(); return p;
+  }
+  var np = [+lat.toFixed(7), +lng.toFixed(7), Math.round(t / 1000), Math.round(acc), holeIdx, Math.round(dwellS || 0)];
+  r.points.push(np); save(); renderPoints(); return np;
+}
+/* Standing still is the signal the timer never had. The lock already means "stopped and stayed
+   put", and it is thrown away the moment you move, so a stop is recorded as it grows and the
+   dwell says how likely it is to be a ball rather than a pause to let a group through. */
+var STOP_MIN_S = 6, stop = null;
+function feedStop(){
+  var r = active();
+  if (!booted || !r || r.id !== S.playingId || r.ended || document.visibilityState === 'hidden'){ stop = null; return; }
+  if (Date.now() - (r.lastAt || r.started) > AUTO_POINT_IDLE_MS){ stop = null; return; }
+  var ls = lockState();
+  if (!ls.locked){ stop = null; return; }
+  var dwell = (Date.now() - still[0].t) / 1000;
+  if (dwell < STOP_MIN_S) return;
+  if (stop && stop.hole === r.cur && yd(distM(stop, ls.pos)) <= MERGE_YD){
+    stop.lat = ls.pos.lat; stop.lng = ls.pos.lng;
+    addPoint(r, ls.pos.lat, ls.pos.lng, still[0].t, ls.pos.acc, r.cur, dwell);
+    return;
+  }
+  stop = {lat:ls.pos.lat, lng:ls.pos.lng, hole:r.cur};
+  addPoint(r, ls.pos.lat, ls.pos.lng, still[0].t, ls.pos.acc, r.cur, dwell);
+}
+window.__feedStop = feedStop;
 window.__maybeAutoPoint = maybeAutoPoint; // exposed for testing
 function renderPoints(){
   pointLayer.clearLayers();
   var r = active(); if (!r || !r.points) return;
   r.points.forEach(function(p, i){
     if (p[4] !== r.cur) return;
-    L.marker([p[0], p[1]], {icon:pointIcon, zIndexOffset:200}).addTo(pointLayer).on('click', function(){ openPoint(r, i); });
+    var d = p[5] || 0;
+    L.marker([p[0], p[1]], {icon:d >= LONG_STAND_S ? standIcon : pointIcon, zIndexOffset:d >= LONG_STAND_S ? 260 : 200})
+      .addTo(pointLayer).on('click', function(){ openPoint(r, i); });
   });
 }
 function openPoint(r, i){
   var p = r.points[i], h = r.holes[p[4]] || curHole();
-  var el = openSheet('<h3>Position point</h3>' +
-    '<div class="sub">' + new Date(p[2] * 1000).toLocaleTimeString() + ' · GPS ±' + r0(yd(p[3])) + ' yd · recorded automatically while the app was open</div>' +
+  var dw = p[5] || 0;
+  var el = openSheet('<h3>' + (dw >= LONG_STAND_S ? 'You stood here' : 'Position point') + '</h3>' +
+    '<div class="sub">' + new Date(p[2] * 1000).toLocaleTimeString() + ' · GPS ±' + r0(yd(p[3])) + ' yd' +
+      (dw ? ' · stood still for ' + (dw >= 60 ? Math.round(dw / 60) + ' min' : Math.round(dw) + ' s') : '') +
+      (dw >= LONG_STAND_S ? '. A stand this long is usually a shot.' : ' · recorded automatically while the app was open') + '</div>' +
     '<div class="stack"><button class="btn pri" id="asShot">Add a shot here</button><button class="btn danger" id="delPt">Delete point</button><button class="btn ghost" id="close">Close</button></div>');
   el.querySelector('#asShot').onclick = function(){
     var shot = {id:uid(), club:null, lie:null, lat:p[0], lng:p[1], acc:p[3], n:1, t:p[2] * 1000, strike:null, miss:[], excluded:false, fromPoint:true};
@@ -1392,6 +1434,8 @@ window.addEventListener('resize', layout);
 
 function pinIcon(i, ex){ return L.divIcon({className:'', html:'<div class="pin' + (ex ? ' ex' : '') + '">' + i + '</div>', iconSize:[28,28], iconAnchor:[14,14]}); }
 var pointIcon = L.divIcon({className:'', html:'<div class="ptdot"></div>', iconSize:[12,12], iconAnchor:[6,6]});
+var LONG_STAND_S = 15;
+var standIcon = L.divIcon({className:'', html:'<div class="stdot"></div>', iconSize:[20,20], iconAnchor:[10,10]});
 var flagIcon = L.divIcon({className:'', html:'<div class="flag">&#9873;</div>', iconSize:[30,30], iconAnchor:[15,15]});
 
 function fitPadding(){
@@ -1719,6 +1763,56 @@ function showResult(o){
 }
 
 /* Editing one shot: the club, how it was struck, where it missed, or moving the marker. */
+/* Forgetting to tap the next hole at the tee puts a whole hole's shots on the hole before it.
+   Deleting and re-recording loses the GPS position, which was the point of recording it, so
+   shots move between holes instead, keeping everything they carry. */
+function holeForN(r, n){
+  for (var i = 0; i < r.holes.length; i++) if (r.holes[i].n === n) return r.holes[i];
+  var h = {n:n, shots:[], green:null};
+  r.holes.push(h);
+  r.holes.sort(function(a, b){ return a.n - b.n; });
+  return h;
+}
+function moveShots(src, from, toN, andAfter){
+  var r = active(); if (!r || !src) return 0;
+  var moving = andAfter ? src.shots.slice(from) : [src.shots[from]];
+  if (!moving.length || !moving[0]) return 0;
+  var tgt = holeForN(r, toN);
+  if (tgt === src) return 0;
+  src.shots.splice(from, moving.length);
+  moving.forEach(function(sh){
+    var at = tgt.shots.length;
+    for (var k = 0; k < tgt.shots.length; k++) if (tgt.shots[k].t > sh.t){ at = k; break; }
+    tgt.shots.splice(at, 0, sh);
+  });
+  save();
+  return moving.length;
+}
+window.__moveShots = moveShots;
+function openMoveShot(h, i){
+  var r = active(); if (!r) return;
+  var after = h.shots.length - i - 1;
+  var ns = [], k;
+  for (k = 1; k <= 18; k++) ns.push(k);
+  var el = openSheet(
+    '<h3>Move shot ' + (i + 1) + ' of hole ' + h.n + '</h3>' +
+    '<div class="sub">It keeps its position, time, club and aim. Shots land in time order on the hole you pick.</div>' +
+    (after ? '<label class="chk"><input type="checkbox" id="andAfter"> Take the ' + plural(after, 'shot') + ' after it too</label>' : '') +
+    '<div class="fl">Move to hole</div><div class="chips" id="hn"></div>' +
+    '<div class="stack"><button class="btn ghost" id="close">Cancel</button></div>');
+  el.querySelector('#hn').innerHTML = ns.map(function(n){
+    return '<button class="chip' + (n === h.n ? ' on' : '') + '" data-n="' + n + '"' + (n === h.n ? ' disabled' : '') + '>' + n + '</button>';
+  }).join('');
+  Array.prototype.forEach.call(el.querySelectorAll('#hn .chip'), function(b){
+    b.onclick = function(){
+      var box = el.querySelector('#andAfter');
+      var n = moveShots(h, i, +b.dataset.n, !!(box && box.checked));
+      closeSheet(true); renderHole(false);
+      toast(n ? plural(n, 'shot') + ' moved to hole ' + b.dataset.n : 'Nothing moved', 3000);
+    };
+  });
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
 function openShotEdit(h, i){
   var s = h.shots[i], d = shotDistYd(h, i);
   var clubs = S.settings.clubs.slice(); if (s.club && clubs.indexOf(s.club) < 0) clubs.unshift(s.club); if (!s.club) clubs.unshift('(not set)');
@@ -1734,8 +1828,8 @@ function openShotEdit(h, i){
     '<div class="fl">Strike</div><div class="chips" id="stC"></div>' +
     '<div class="fl">Miss</div><div class="chips" id="msC"></div>' +
     '<label class="chk"><input type="checkbox" id="ex"' + (s.excluded ? ' checked' : '') + '> Exclude from club stats</label>' +
-    '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn danger" id="del">Delete shot</button></div>' +
-    '<div class="stack"><button class="btn pri" id="done">Done</button></div>',
+    '<div class="row"><button class="btn sec" id="move">Move marker</button><button class="btn sec" id="toHole">Move to hole\u2026</button></div>' +
+    '<div class="row"><button class="btn danger" id="del">Delete shot</button><button class="btn pri" id="done">Done</button></div>',
     function(){ save(); renderHole(false); });
   el.querySelector('#club').onchange = function(e){ s.club = e.target.value === '(not set)' ? null : e.target.value; save(); };
   chips(el.querySelector('#lieC'), LIES, function(){ return s.lie || null; }, function(v){ s.lie = v; save(); });
@@ -1744,6 +1838,7 @@ function openShotEdit(h, i){
   el.querySelector('#ex').onchange = function(e){ s.excluded = e.target.checked; save(); };
   if (s.plan) el.querySelector('#dropPlan').onclick = function(){ if (confirm('Remove the aim point from this shot?')){ delete s.plan; save(); closeSheet(true); renderHole(false); } };
   el.querySelector('#move').onclick = function(){ closeSheet(true); renderHole(false); enableMove(s.id, s); };
+  el.querySelector('#toHole').onclick = function(){ closeSheet(true); openMoveShot(h, i); };
   el.querySelector('#del').onclick = function(){
     if (!confirm('Delete shot ' + (i+1) + ' (' + s.club + ')?')) return;
     h.shots.splice(i, 1); save(); closeSheet(true); renderHole(false); toast('Shot deleted');
@@ -2218,14 +2313,110 @@ function openHolePicker(){
 
 /* ---------- review a round ---------- */
 var GAP_HINT_YD = 30;
+/* Everything that looks wrong in a round, with the one tap that fixes each. These are the
+   mistakes that actually happen: a green placed on the wrong hole, the drive home logged as a
+   shot, the same ball marked twice, a hole finished without its putts. */
+var MONSTER_YD = 400, DUP_YD = 6, DUP_MS = 120000, DUP_GREEN_YD = 8;
+function roundCheck(r){
+  var out = [];
+  if (!r) return out;
+  r.holes.forEach(function(h, hi){
+    h.shots.forEach(function(sh, si){
+      var d = shotDistYd(h, si);
+      if (d != null && d > MONSTER_YD)
+        out.push({kind:'monster', hi:hi, si:si, text:'Hole ' + h.n + ', shot ' + (si + 1) + ' measures ' + r0(d) + ' yd',
+                  why:'Longer than any golf shot \u2014 usually the drive home, or a hole change that was missed.',
+                  fix:'Delete it'});
+      if (si > 0){
+        var pv = h.shots[si - 1];
+        if (yd(distM(pv, sh)) <= DUP_YD && Math.abs(sh.t - pv.t) <= DUP_MS)
+          out.push({kind:'dup', hi:hi, si:si, text:'Hole ' + h.n + ', shots ' + si + ' and ' + (si + 1) + ' are ' + r0(yd(distM(pv, sh))) + ' yd apart',
+                    why:'Two marks at the same ball within two minutes is usually one shot recorded twice.',
+                    fix:'Delete the second'});
+      }
+    });
+    if (h.green && h.shots.length && !puttCount(h) && !(h.green.holed))
+      out.push({kind:'noputts', hi:hi, text:'Hole ' + h.n + ' is finished with no putts',
+                why:'Scores and putting stats will both be short.', fix:'Open the hole card'});
+  });
+  // The greens that matter are the course pins: they are shared by every round played here, so a
+  // pin dropped on the wrong hole quietly poisons every yardage on that hole, for good.
+  var c = courseForRound(r);
+  if (c && c.greens){
+    var ns = Object.keys(c.greens).sort(function(a, b){ return +a - +b; });
+    ns.forEach(function(na, i){
+      ns.slice(i + 1).forEach(function(nb){
+        var gap = yd(distM(c.greens[na], c.greens[nb]));
+        if (gap > DUP_GREEN_YD) return;
+        out.push({kind:'dupgreen', n:+nb,
+                  text:'Holes ' + na + ' and ' + nb + ' share a green pin',
+                  why:'Their centres are ' + (gap < 1 ? 'less than a yard' : r0(gap) + ' yd') + ' apart, so one is on the wrong hole. Every yardage on that hole is wrong until it is moved.',
+                  fix:'Re-place hole ' + nb});
+      });
+    });
+  }
+  (r.points || []).forEach(function(pt, pi){
+    if ((pt[5] || 0) < LONG_STAND_S) return;
+    var h = r.holes[pt[4]]; if (!h) return;
+    var near = h.shots.some(function(sh){ return yd(distM(sh, {lat:pt[0], lng:pt[1]})) <= MERGE_YD * 2; });
+    if (near) return;
+    out.push({kind:'stand', hi:pt[4], pi:pi,
+              text:'Hole ' + h.n + ': you stood ' + (pt[5] >= 60 ? Math.round(pt[5] / 60) + ' min' : pt[5] + ' s') + ' somewhere with no shot',
+              why:'A stand that long with nothing recorded is usually a shot that was missed.', fix:'Add a shot there'});
+  });
+  // Worst first: a pin on the wrong hole poisons every yardage on it for every round, a phantom
+  // shot changes the score, a missed shot loses one, and putts are a stat rather than a stroke.
+  var rank = {dupgreen:0, monster:1, dup:2, stand:3, noputts:4};
+  out.sort(function(a, b){ return (rank[a.kind] - rank[b.kind]) || 0; });
+  return out;
+}
+window.__roundCheck = roundCheck;
 function openReview(){
   var r = active();
   if (!r){ toast('No round open. Open one from Rounds first.'); return; }
   var el = openSheet('<h3>Review ' + esc(r.course || 'this round') + '</h3>' +
     '<div class="sub">Fix anything you did not have time for on the course. Tap a shot to edit it, or turn an automatic point into a shot.</div>' +
+    '<div id="dr"></div>' +
     '<div id="rv"></div>' +
     '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+  function drawDoctor(){
+    var issues = roundCheck(r), box = el.querySelector('#dr');
+    if (!issues.length){ box.innerHTML = '<div class="mlab">Checks</div><div class="note">Nothing looks wrong in this round.</div>'; return; }
+    box.innerHTML = '<div class="mlab">' + plural(issues.length, 'thing') + ' to check</div><div class="rlist">' +
+      issues.map(function(x, i){
+        // the reason is the same for every repeat of a kind, so say it once and keep the list scannable
+        var first = i === 0 || issues[i - 1].kind !== x.kind;
+        return '<div class="ritem"><div class="rt">' + esc(x.text) + '</div>' +
+          (first ? '<div class="rs">' + esc(x.why) + '</div>' : '<div style="height:6px"></div>') +
+          '<div class="rb"><button data-d="' + i + '">' + esc(x.fix) + '</button></div></div>';
+      }).join('') + '</div>';
+    Array.prototype.forEach.call(box.querySelectorAll('button[data-d]'), function(b){
+      b.onclick = function(){ applyFix(issues[+b.dataset.d]); };
+    });
+  }
+  function applyFix(x){
+    var h = r.holes[x.hi];
+    if (x.kind === 'monster' || x.kind === 'dup'){
+      if (!h || !h.shots[x.si]) return;
+      if (!confirm('Delete hole ' + h.n + ' shot ' + (x.si + 1) + '?')) return;
+      h.shots.splice(x.si, 1); save(); renderHole(false); draw(); toast('Shot deleted');
+      return;
+    }
+    if (x.kind === 'noputts'){ closeSheet(true); openCard(h, 'edit'); return; }
+    if (x.kind === 'dupgreen'){
+      var r2 = active(); if (!r2) return;
+      var at = -1, k;
+      for (k = 0; k < r2.holes.length; k++) if (r2.holes[k].n === x.n){ at = k; break; }
+      if (at < 0){ holeForN(r2, x.n); for (k = 0; k < r2.holes.length; k++) if (r2.holes[k].n === x.n){ at = k; break; } }
+      if (at < 0) return;
+      r2.cur = at; save();
+      closeSheet(true); renderHole(false); startPlaceGreen(false);
+      return;
+    }
+    if (x.kind === 'stand'){ closeSheet(true); openPoint(r, x.pi); return; }
+  }
   function draw(){
+    drawDoctor();
     var html = '';
     r.holes.forEach(function(h, hi){
       if (!h.shots.length && !h.green && !(r.points || []).some(function(p){ return p[4] === hi; })) return;
