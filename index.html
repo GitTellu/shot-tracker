@@ -416,7 +416,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.18.0', SCHEMA = 5;
+var APP_VERSION = '1.19.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -622,6 +622,13 @@ function gpsPill(){
   var ls = lockState();
   renderStatus();
   if (ls.locked){ el.className = 'pill lock'; el.textContent = 'Locked ±' + r0(yd(ls.pos.acc)) + ' yd'; return; }
+  // Standing still and converging: say how long until a tap records instantly. Walking resets the
+  // window on every fix, so n stays at 1 and no countdown is promised that cannot be kept.
+  if (ls.pending && ls.n >= 2){
+    el.className = 'pill fair';
+    el.textContent = 'Locking ' + Math.max(1, Math.ceil(ls.leftMs / 1000)) + ' s';
+    return;
+  }
   var a = fix.acc;
   el.className = 'pill ' + (a <= 5 ? 'good' : a <= 10 ? 'fair' : 'poor');
   el.textContent = 'GPS ±' + r0(yd(a)) + ' yd';
@@ -672,7 +679,15 @@ function startGPS(){
    - No fresh fix yet: the app keeps waiting and says so. Using an older fix is an explicit choice and is flagged.
    - Weak fix (median worse than WEAK_ACC_M): the app asks, and never blocks. */
 function requestFresh(){ try { navigator.geolocation.getCurrentPosition(function(p){ onPos(p, true); }, function(){}, {enableHighAccuracy:true, maximumAge:0, timeout:15000}); } catch(e){} }
-function startCapture(){ cap = {start:Date.now(), samples:[]}; requestFresh(); }
+/* The background averager has been collecting fixes the whole time you stood here — feedStill
+   throws its window away the moment you move or walk, so whatever is in it was measured at the
+   spot you are standing on now. Seed the capture with it and count its span, rather than
+   gathering the same seconds over again while you wait. */
+function startCapture(){
+  var seed = still.slice();
+  cap = {start: seed.length ? seed[0].t : Date.now(), samples: seed};
+  requestFresh();
+}
 function combine(samples){
   var good = samples.filter(function(f){ return f.acc <= 50; });
   if (good.length) samples = good;
@@ -690,13 +705,22 @@ function awaitCapture(){
     if (!cap) startCapture();
     var need = S.settings.avgSeconds * 1000, iv = null, finished = false, phase = 'avg', extraUntil = 0, lastAsk = Date.now();
     var ov = $('#capOverlay'), bSkip = $('#capSkip'), bStale = $('#capStale'), bWait = $('#capWait'), bAny = $('#capAnyway');
+    var opened = Date.now(), GRACE_MS = 900;
     function fresh(){ return cap ? cap.samples.length : 0; }
     function finish(res){ if (finished) return; finished = true; if (iv) clearInterval(iv); ov.hidden = true; cap = null; resolve(res); }
-    function show(title, big, info, b){ $('#capTitle').textContent = title; $('#capCount').textContent = big; $('#capInfo').textContent = info;
+    function show(title, big, info, b){
+      ov.hidden = Date.now() - opened < GRACE_MS;   // most captures finish inside this, unseen
+      $('#capTitle').textContent = title; $('#capCount').textContent = big; $('#capInfo').textContent = info;
       bSkip.hidden = !b.skip; bStale.hidden = !b.stale; bWait.hidden = !b.wait; bAny.hidden = !b.anyway; }
     function accept(){ var pos = combine(cap.samples); if (!pos) return; pos.stale = false; pos.ageS = 0; pos.weak = pos.acc > WEAK_ACC_M; finish(pos); }
     function tick(){
       if (finished) return;
+      // the background lock is the same measurement, and it may get there first: take it
+      var ls = lockState();
+      if (phase === 'avg' && ls.locked){
+        finish(Object.assign({}, ls.pos, {stale:false, ageS:0, weak:false, locked:true, lockS:ls.spanS}));
+        return;
+      }
       var el = Date.now() - cap.start, n = fresh();
       if (phase === 'avg'){
         if (el < need){ show('Locking GPS position', Math.ceil((need - el) / 1000), n + ' fresh fix' + (n === 1 ? '' : 'es') + ' so far. Hold still.', {skip:n > 0}); return; }
@@ -725,7 +749,7 @@ function awaitCapture(){
     bWait.onclick = function(){ extraUntil = Date.now() + 5000; tick(); };
     bAny.onclick = function(){ accept(); };
     $('#capCancel').onclick = function(){ finish(null); };
-    ov.hidden = false; tick();
+    tick();   // show() decides when the overlay is worth putting up
     if (!finished) iv = setInterval(tick, 200);
   });
 }
@@ -750,7 +774,8 @@ function lockState(){
   var last = still[still.length - 1];
   if (Date.now() - last.t > LOCK_MAX_GAP_MS) return {locked:false};
   var span = last.t - still[0].t;
-  if (span < LOCK_MIN_MS || still.length < LOCK_MIN_FIXES) return {locked:false, pending:true};
+  if (span < LOCK_MIN_MS || still.length < LOCK_MIN_FIXES)
+    return {locked:false, pending:true, n:still.length, leftMs:Math.max(0, LOCK_MIN_MS - span)};
   var pos = combine(still);
   if (!pos || pos.acc > WEAK_ACC_M) return {locked:false, weak:true};
   return {locked:true, pos:pos, spanS:Math.round(span / 1000)};
