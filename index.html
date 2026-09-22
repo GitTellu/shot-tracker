@@ -23,6 +23,8 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%} /* Chrome on Android inflates text otherwise, which stretched button labels onto two lines */
+#stMain,#stSub,#planNum,#planSub,#rcMain,#gps,.pnum,.pin,.dtip,.stepv,.stats,.mh2,.rt,.rs,.tval{
+ font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
 html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg);-webkit-tap-highlight-color:transparent;overscroll-behavior:none;-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;cursor:pointer}
 #mapWrap{position:fixed;top:0;left:0;right:0;bottom:200px;overflow:hidden;background:#cfd8cf}
@@ -35,6 +37,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 #top>*{pointer-events:auto}
 .ib{width:44px;height:44px;border-radius:13px;border:1px solid rgba(11,59,42,.07);background:rgba(255,255,255,.96);box-shadow:var(--sh1);font-size:21px;font-weight:700;display:flex;align-items:center;justify-content:center;color:var(--ink);transition:transform .12s var(--ease),background .12s var(--ease)}
 .ib:active{transform:scale(.93);background:var(--g3)}
+.ib svg{width:22px;height:22px;stroke:var(--ink);stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.ichip svg{width:17px;height:17px;stroke:var(--ink2);stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round;display:block}
+.ichip{display:flex;align-items:center;justify-content:center}
 #holeNav{display:flex;align-items:center;background:rgba(255,255,255,.96);border:1px solid rgba(11,59,42,.07);border-radius:13px;box-shadow:var(--sh1)}
 #holeNav .ib{box-shadow:none;background:none;border:0;font-size:26px;color:var(--ink2)}
 #holeLabel{border:0;background:none;font-weight:800;font-size:17px;letter-spacing:-.2px;min-width:80px;height:44px}
@@ -70,7 +75,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 #rcAsk{margin-top:8px}
 #rcClubs{display:grid;grid-template-rows:repeat(2,auto);grid-auto-flow:column;grid-auto-columns:max-content;gap:6px}
 #rcClubs .chip{padding:11px 13px;font-size:16px;font-weight:800}
-.leaflet-control-attribution{background:rgba(255,255,255,.7)!important;color:var(--mut)!important;font-size:10px!important;line-height:1.5!important;padding:1px 6px!important;border-radius:8px 0 0 0}
+.leaflet-control-attribution{background:rgba(255,255,255,.66)!important;color:var(--mut)!important;font-size:9px!important;line-height:1.4!important;padding:1px 5px!important;border-radius:7px 0 0 0;max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.75}
 .leaflet-control-attribution a{color:var(--mut)!important;text-decoration:none}
 .ptdot{width:12px;height:12px;border-radius:50%;background:#1e88e5;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
 .stdot{width:20px;height:20px;border-radius:50%;background:#1e88e5;border:3px solid #fff;
@@ -84,7 +89,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 #planBox{margin-top:6px}
 .planHead{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
 .planHead .pnum{font-size:26px;white-space:nowrap;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
-#planClose{flex:none;font-size:20px;padding:6px 2px 6px 12px}
+#planClose{flex:none;padding:6px 2px 6px 12px}
+#planClose svg{width:21px;height:21px;stroke:var(--g2);stroke-width:2.1;fill:none;stroke-linecap:round;display:block}
 .planCtl{display:flex;align-items:center;gap:8px;flex-wrap:nowrap;margin-top:8px}
 .planCtl .chip{padding:9px 11px;font-size:15px;flex:none}
 .planCtl .cchip{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -205,7 +211,8 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 #toast{position:fixed;left:0;right:0;margin:0 auto;width:max-content;top:calc(env(safe-area-inset-top) + 64px);z-index:4000;background:#111;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700;font-size:15px;max-width:calc(100% - 32px);box-shadow:0 4px 14px rgba(0,0,0,.35);text-align:center}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
-.flag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid #d32f2f;color:#d32f2f;font-weight:900;font-size:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.flag{width:30px;height:30px;border-radius:50%;background:var(--gold);border:3px solid #fff;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 5px rgba(0,0,0,.45)}
+.flag svg,.gflag svg{width:17px;height:17px;stroke:currentColor;stroke-width:2;fill:none;stroke-linecap:round;stroke-linejoin:round}
 .scrow{border:1px solid var(--line);border-radius:12px;padding:9px 10px;margin-bottom:8px}
 .scrow.done{border-color:#bcd7c6;background:#fbfdfb}
 .scrow .sch{display:flex;align-items:center;gap:8px;margin-bottom:7px}
@@ -248,7 +255,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .putt .chips{margin:2px 0}
 .putt .chip{padding:6px 9px;font-size:13px}
 .scoreline{font-size:13px;color:var(--mut);font-weight:600;margin-top:2px}
-.gflag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid var(--g2);color:var(--g2);font-weight:900;font-size:17px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
+.gflag{width:30px;height:30px;border-radius:50%;background:#fff;border:3px solid var(--g2);color:var(--g2);display:flex;align-items:center;justify-content:center;box-shadow:0 1px 5px rgba(0,0,0,.45)}
 .gflag.set{background:var(--g2);color:#fff}
 #tgtBar{position:fixed;left:8px;right:8px;z-index:2400;background:#0E1512;color:#fff;border-radius:16px;padding:10px 12px 11px;box-shadow:0 2px 16px rgba(0,0,0,.42)}
 .tgtTop{display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
@@ -275,7 +282,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 <div id="mapWrap"><div id="map"></div></div>
 
 <header id="top">
-  <button id="menuBtn" class="ib" aria-label="Menu">&#9776;</button>
+  <button id="menuBtn" class="ib" aria-label="Menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
   <div id="holeNav">
     <button id="prevHole" class="ib" aria-label="Previous hole">&#8249;</button>
     <button id="holeLabel">Hole 1</button>
@@ -286,8 +293,8 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 
 <div id="fabs">
   <button id="rotBtn" class="ib" aria-label="Map rotation" title="North up / shot up">N</button>
-  <button id="layerBtn" class="ib" aria-label="Map type" title="Street / Satellite">&#9707;</button>
-  <button id="centerBtn" class="ib" aria-label="Center on me" title="Center on me">&#9678;</button>
+  <button id="layerBtn" class="ib" aria-label="Map type" title="Street / Satellite"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 7.5l9 4.5 9-4.5L12 3z"/><path d="M3 12.5 12 17l9-4.5M3 17 12 21.5 21 17"/></svg></button>
+  <button id="centerBtn" class="ib" aria-label="Center on me" title="Center on me"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.4"/><circle cx="12" cy="12" r="8"/><path d="M12 1.6v2.6M12 19.8v2.6M22.4 12h-2.6M4.2 12H1.6"/></svg></button>
 </div>
 
 <div id="tgtBar" hidden>
@@ -301,16 +308,16 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 
 <section id="panel">
   <div id="grip" role="button" tabindex="0" aria-label="Collapse the panel for more map"><span></span></div>
-  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green &#9971;</button><button id="greenBtn" class="link" hidden>Finish hole &#9873;</button></div>
+  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green</button><button id="greenBtn" class="link" hidden>Finish hole</button></div>
   <div id="planBox" hidden>
     <div class="planHead">
       <div id="planNum" class="pnum">— yd</div>
-      <button id="planClose" class="link" aria-label="Back, without planning">&#10005;</button>
+      <button id="planClose" class="link ichip" aria-label="Back, without planning"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="psub" id="planSub"></div>
     <div class="planCtl">
       <button id="planClubBtn" class="chip cchip">Club</button>
-      <button id="planEdit" class="chip" title="Shot pattern">&#9881;</button>
+      <button id="planEdit" class="chip ichip" title="Shot pattern" aria-label="Shot pattern"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 14.6a1.6 1.6 0 0 0 .32 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.77-.32 1.6 1.6 0 0 0-1 1.46V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.77.32l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.6 1.6 0 0 0 .32-1.77 1.6 1.6 0 0 0-1.46-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.32-1.77l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.6 1.6 0 0 0 1.77.32H9a1.6 1.6 0 0 0 1-1.46V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.46 1.6 1.6 0 0 0 1.77-.32l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.6 1.6 0 0 0-.32 1.77V9a1.6 1.6 0 0 0 1.46 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.46 1z"/></svg></button>
       <button id="pwMinus" class="chip" aria-label="Narrower pattern">&minus;</button>
       <button id="pwPlus" class="chip" aria-label="Wider pattern">+</button>
     </div>
@@ -320,7 +327,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
   <div class="actions" id="actions">
     <button id="planBtn" class="btn plan">AIM</button>
     <button id="recBtn" class="btn pri">MARK BALL</button>
-    <button id="holedBtn" class="btn pri" hidden>HOLED IT &#9873;</button>
+    <button id="holedBtn" class="btn pri" hidden>HOLED IT</button>
   </div>
 </section>
 
@@ -418,7 +425,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.20.0', SCHEMA = 5;
+var APP_VERSION = '1.21.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -840,11 +847,11 @@ function renderStatus(){
       (penTotal(cardOf(h)) ? ' · ' + plural(penTotal(cardOf(h)), 'penalty', 'penalties') : '') + ' · tap the flag to edit · ' + gps; return;
   }
   if (!open){
-    main.textContent = toG == null ? 'Hole ' + h.n + ' · no ball marked' : r0(toG) + ' yd to the green';
+    main.textContent = toG == null ? 'Hole ' + h.n + ' · no ball marked' : ydLabel(toG) + ' to the green';
     sub.textContent = (toG == null ? 'Tee shot' : 'Hole ' + h.n + ' · tee shot') + gTail; return;
   }
   var d = fix ? r0(yd(distM(open, fix))) : null;
-  main.textContent = toG != null ? r0(toG) + ' yd to the green'
+  main.textContent = toG != null ? ydLabel(toG) + ' to the green'
                                  : (d == null ? '—' : d + ' yd') + ' from your ball';
   // no green placed means the headline is already the walk, so do not say it twice
   var where = phase === 'green' ? 'On the green'
@@ -1148,8 +1155,9 @@ function toGreenYd(from, h){
 }
 window.__greenFor = greenFor; window.__courseFor = courseFor;
 
-var greenIcon = L.divIcon({className:'', html:'<div class="gflag set">&#9971;</div>', iconSize:[30,30], iconAnchor:[15,15]});
-var greenPickIcon = L.divIcon({className:'', html:'<div class="gflag">&#9971;</div>', iconSize:[30,30], iconAnchor:[15,15]});
+var GFLAG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 21V3.4"/><path d="M6.6 4.2h11.2l-2.6 4 2.6 4H6.6z" fill="currentColor" stroke="none"/></svg>';
+var greenIcon = L.divIcon({className:'', html:'<div class="gflag set">' + GFLAG + '</div>', iconSize:[30,30], iconAnchor:[15,15]});
+var greenPickIcon = L.divIcon({className:'', html:'<div class="gflag">' + GFLAG + '</div>', iconSize:[30,30], iconAnchor:[15,15]});
 
 /* Placing: tap the centre of the green, drag to nudge, Save. */
 var placing = null;
@@ -1293,11 +1301,12 @@ function fitHole(){
     return false;
   }
   follow = false;
-  map.fitBounds(pts, {padding:fitPadding(), maxZoom:19});
+  map.fitBounds(pts, fitOpts(19));
   autoFitD = (g && fix) ? distM(fix, g) : null; autoFitAt = Date.now();
   updateAutoBearing(true);
   return true;
 }
+window.__fitOpts = fitOpts;
 function maybeAutoFit(){
   if (follow || placing || aimDragging || !fix || !booted || awayFromCourse()) return;
   var g = greenFor(curHole()); if (!g) return;
@@ -1436,13 +1445,22 @@ function pinIcon(i, ex){ return L.divIcon({className:'', html:'<div class="pin' 
 var pointIcon = L.divIcon({className:'', html:'<div class="ptdot"></div>', iconSize:[12,12], iconAnchor:[6,6]});
 var LONG_STAND_S = 15;
 var standIcon = L.divIcon({className:'', html:'<div class="stdot"></div>', iconSize:[20,20], iconAnchor:[10,10]});
-var flagIcon = L.divIcon({className:'', html:'<div class="flag">&#9873;</div>', iconSize:[30,30], iconAnchor:[15,15]});
+var flagIcon = L.divIcon({className:'', html:'<div class="flag">' + GFLAG + '</div>', iconSize:[30,30], iconAnchor:[15,15]});
 
 function fitPadding(){
   var el = $('#map'), wrap = $('#mapWrap');
   var px = Math.max(50, (el.offsetWidth - wrap.clientWidth) / 2 + 40);
   var py = Math.max(50, (el.offsetHeight - wrap.clientHeight) / 2 + 40);
   return [px, py];
+}
+/* The top bar floats over the map, so a fit that only knows the map's own box tucks the first
+   pin underneath it. Give the top the bar's height as well. */
+function fitOpts(maxZoom){
+  var pad = fitPadding(), top = $('#top');
+  var th = top ? top.getBoundingClientRect().height + 12 : 0;
+  var o = {paddingTopLeft:[pad[0], pad[1] + th], paddingBottomRight:[pad[0], pad[1]]};
+  if (maxZoom) o.maxZoom = maxZoom;
+  return o;
 }
 function renderHole(fit){
   if (plan && planKey !== holeKey()) endPlan(true);
@@ -1463,7 +1481,7 @@ function renderHole(fit){
         var am = L.marker([s.plan.lat, s.plan.lng], {icon:aimDoneIcon, interactive:false}).addTo(holeLayer);
         var pr = planResultFor(h, i);
         if (e && pr) L.polyline([[s.plan.lat, s.plan.lng], [e.pt.lat, e.pt.lng]], {color:'#ff9800', weight:2, dashArray:'4 6', opacity:0.9})
-          .bindTooltip('<span class="urot">' + missText(pr) + '</span>', {permanent:true, direction:'center', className:'dtip p3'}).addTo(holeLayer);
+          .bindTooltip('<span class="urot">' + missText(pr) + '</span>', {permanent:i === h.shots.length - 1, direction:'center', className:'dtip p3'}).addTo(holeLayer);
       }
       var m = L.marker([s.lat, s.lng], {icon:pinIcon(i+1, s.excluded), zIndexOffset:1000}).addTo(holeLayer);
       m.on('click', function(){ openShotEdit(h, i); });
@@ -1488,7 +1506,7 @@ function renderHole(fit){
       if (greenPos(h)) pts.push([h.green.lat, h.green.lng]);
       if (cg) pts.push([cg.lat, cg.lng]);
       if (fix && !away && (cg || !greenPos(h))) pts.push([fix.lat, fix.lng]);
-      if (pts.length >= 2){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); autoFitAt = Date.now(); autoFitD = (cg && fix) ? distM(fix, cg) : null; }
+      if (pts.length >= 2){ follow = false; map.fitBounds(pts, fitOpts(19)); autoFitAt = Date.now(); autoFitD = (cg && fix) ? distM(fix, cg) : null; }
       else if (pts.length === 1 && away){ follow = false; map.setView(pts[0], Math.max(map.getZoom(), 16)); }
       else if (fix && !away){ follow = true; map.setView([fix.lat, fix.lng], 18); }
       // away from the course with nothing on this hole yet: leave the map exactly where you left it
@@ -1499,9 +1517,18 @@ function renderHole(fit){
 
 function openShot(h){ return (h && h.shots.length && !h.green) ? h.shots[h.shots.length - 1] : null; }
 function plural(n, one, many){ return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+/* Past about a thousand yards the number stops being a golf distance and starts being a
+   journey, so it is written like one. */
+function ydLabel(d){
+  if (d == null) return null;
+  if (d < 1200) return r0(d) + ' yd';
+  var mi = d / 1760;
+  return (mi < 10 ? mi.toFixed(1) : r0(mi)) + ' mi';
+}
+window.__ydLabel = ydLabel;
 function greenLabel(){
   var d = fix ? toGreenYd({lat:fix.lat, lng:fix.lng}) : null;
-  return d == null ? 'green' : r0(d) + ' yd';
+  return d == null ? 'green' : ydLabel(d);
 }
 function updateLive(){
   var h = curHole(), open = openShot(h);
@@ -3066,7 +3093,7 @@ function openShotLog(r){
         var pts = [[x.s.lat, x.s.lng]];
         if (x.s.plan) pts.push([x.s.plan.lat, x.s.plan.lng]);
         var e = shotEnd(x.h, x.si); if (e) pts.push([e.pt.lat, e.pt.lng]);
-        if (pts.length > 1){ follow = false; map.fitBounds(pts, {padding:fitPadding(), maxZoom:19}); }
+        if (pts.length > 1){ follow = false; map.fitBounds(pts, fitOpts(19)); }
         else map.setView(pts[0], 18);
         openShotEdit(x.h, x.si);
       };
@@ -3528,7 +3555,7 @@ function openOffline(){
       bt.onclick = function(){
         var a = S.offlineAreas[+bt.dataset.i];
         if (bt.dataset.a === 'view'){
-          follow = false; closeSheet(true); map.fitBounds([[a.b.s, a.b.w], [a.b.n, a.b.e]], {padding:fitPadding()});
+          follow = false; closeSheet(true); map.fitBounds([[a.b.s, a.b.w], [a.b.n, a.b.e]], fitOpts());
           var want = a.src === 'mapbox' && S.settings.mapboxToken ? 'mapbox' : 'usgs';
           if (S.settings.basemap !== want){ S.settings.basemap = want; save(); setBase(); }
           return;
