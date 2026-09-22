@@ -47,6 +47,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 #lastCard{margin-top:10px;border-top:1px solid var(--line);padding-top:8px}
 .lcHead{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px}
 .link{border:0;background:none;color:var(--g2);font-weight:800;padding:6px 0 6px 12px}
+#statusLine .link{white-space:nowrap;flex:none;align-self:center}
 .chips{display:flex;gap:6px;overflow-x:auto;padding:4px 0;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;padding:8px 13px;border-radius:999px;border:1.5px solid var(--line);background:#fff;color:var(--ink2);font-size:14px;font-weight:700;transition:transform .12s var(--ease),background .12s var(--ease)}
@@ -60,6 +61,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 #stSub{font-size:13px;color:var(--mut);font-weight:600}
 #resultCard{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);z-index:2500;background:#fff;border-radius:18px;box-shadow:0 -2px 18px rgba(0,0,0,.35);padding:14px 16px calc(env(safe-area-inset-bottom) + 14px);max-height:80vh;overflow:auto}
 .rcHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.rcActs{display:flex;align-items:center;gap:2px;flex:none;white-space:nowrap}
 #rcMain{font-size:30px;font-weight:900;line-height:1.1;letter-spacing:-.5px}
 #rcTags{margin-top:6px}
 #rcAsk{margin-top:8px}
@@ -285,8 +287,9 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
     <div class="row"><button id="markBtn" class="btn ghost">Just mark</button><button id="goBtn" class="btn pri">Go</button></div>
   </div>
   <div class="actions">
-    <button id="planBtn" class="btn plan">PLAN</button>
-    <button id="recBtn" class="btn pri">RECORD</button>
+    <button id="planBtn" class="btn plan">AIM</button>
+    <button id="recBtn" class="btn pri">MARK BALL</button>
+    <button id="holedBtn" class="btn pri" hidden>HOLED IT &#9873;</button>
   </div>
 </section>
 
@@ -309,7 +312,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 
 <div id="toast" hidden></div>
 <div id="resultCard" hidden>
-  <div class="rcHead"><div><div id="rcMain">—</div><div id="rcSub" class="psub"></div></div><button id="rcUndo" class="link">Undo</button></div>
+  <div class="rcHead"><div><div id="rcMain">—</div><div id="rcSub" class="psub"></div></div><div class="rcActs"><button id="rcTagBtn" class="link" hidden>Tag it</button><button id="rcUndo" class="link">Undo</button></div></div>
   <div id="rcAsk" hidden><div class="clab" style="width:auto;margin-bottom:4px">What did you hit?</div><div class="chips" id="rcClubs"></div></div>
   <div id="rcTags" hidden><div class="chips"><span class="clab">Strike</span><span id="rcStrike" style="display:contents"></span></div><div class="chips"><span class="clab">Miss</span><span id="rcMiss" style="display:contents"></span></div></div>
   <button id="rcSep" class="btn ghost" style="margin-bottom:8px" hidden>No, that was a separate shot</button>
@@ -384,7 +387,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.16.0', SCHEMA = 5;
+var APP_VERSION = '1.17.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -726,7 +729,38 @@ function lockState(){
 window.__lockState = lockState;
 document.addEventListener('visibilitychange', function(){ still = []; if (document.visibilityState === 'visible') setTimeout(function(){ maybeAutoPoint(true); }, 4000); });
 
-/* The bar shows one line: what the app is waiting for, or how far you have walked from your ball. */
+/* Where you stand in the shot: at your ball, walked up to it, or on the green. The two
+   thresholds overlap on purpose — inside the dead band the phase holds, so GPS scatter of a
+   few yards cannot flip the buttons while you stand still. */
+var AT_BALL_YD = 12, WALKED_YD = 30, ON_GREEN_YD = 30;
+var phase = 'tee';
+function shotPhase(h, open){
+  if (!h || h.green) return 'done';
+  var toG = fix ? toGreenYd({lat:fix.lat, lng:fix.lng}, h) : null;
+  if (h.shots.length && toG != null && toG <= ON_GREEN_YD) return 'green';
+  if (!open) return 'tee';
+  if (!fix) return phase === 'walked' ? 'walked' : 'atball';
+  var d = yd(distM(open, fix));
+  if (d <= AT_BALL_YD) return 'atball';
+  if (d >= WALKED_YD) return 'walked';
+  return phase === 'walked' ? 'walked' : 'atball';
+}
+/* One primary button, and it is whatever you are about to do. */
+function renderActions(h){
+  var pb = $('#planBtn'), rb = $('#recBtn'), hb = $('#holedBtn');
+  if (plan){ hb.hidden = true; pb.hidden = false; rb.hidden = false; return; }
+  var green = phase === 'green' && h && h.shots.length;
+  hb.hidden = !green;
+  pb.hidden = !!green;
+  rb.hidden = false;
+  if (green){ rb.className = 'btn ghost'; rb.textContent = 'MARK BALL'; return; }
+  pb.textContent = 'AIM';
+  rb.textContent = phase === 'walked' ? "I'M AT MY BALL" : 'MARK BALL';
+  if (phase === 'walked'){ pb.className = 'btn ghost'; rb.className = 'btn pri'; }
+  else { pb.className = 'btn plan'; rb.className = 'btn ghost'; }
+}
+/* The bar leads with the number you actually want — yards to the green — and says in words
+   where you are, so you never have to guess which button is the next move. */
 function renderStatus(){
   var main = $('#stMain'), sub = $('#stSub'); if (!main) return;
   var h = curHole(), open = openShot(h), ls = lockState();
@@ -734,11 +768,15 @@ function renderStatus(){
   var gps = rr && rr.ended ? 'round ended' :
     (!fix ? 'waiting for GPS' : (Date.now() - fix.t > STALE_FIX_MS ? 'GPS ' + Math.round((Date.now() - fix.t) / 1000) + ' s old' : (ls.locked ? 'locked ±' + r0(yd(ls.pos.acc)) + ' yd' : 'getting a fresh fix')));
   var toG = (h && fix) ? toGreenYd({lat:fix.lat, lng:fix.lng}, h) : null;
-  var gTxt = toG == null ? '' : ' · ' + r0(toG) + ' yd to green';
+  // the pill in the corner already says 'Locked ±4 yd'; only repeat it here when it is a warning
+  var gTail = ls.locked ? '' : ' · ' + gps;
   var unfinished = !!(h && h.shots.length && !h.green);
-  $('#greenBtn').hidden = !unfinished;
+  phase = shotPhase(h, open);
+  renderActions(h);
+  // the link is the way out when no green is placed and the app cannot tell you are on one
+  $('#greenBtn').hidden = !unfinished || phase === 'green';
   $('#tgtBtn').hidden = !(h && !greenFor(h) && !placing) || unfinished;
-  if (!active() || !h){ main.textContent = 'Ready to play'; sub.textContent = 'PLAN your tee shot, or RECORD to mark your ball · ' + gps; return; }
+  if (!active() || !h){ main.textContent = 'Ready to play'; sub.textContent = 'AIM your tee shot, or MARK BALL where it lies · ' + gps; return; }
   if (h.green){
     main.textContent = 'Hole ' + h.n + ' · ' + holeScore(h) + ' strokes';
     sub.textContent = plural(h.shots.length, 'shot') + ' · ' + plural(puttCount(h), 'putt') +
@@ -746,11 +784,16 @@ function renderStatus(){
   }
   if (!open){
     main.textContent = toG == null ? 'Hole ' + h.n + ' · no ball marked' : r0(toG) + ' yd to the green';
-    sub.textContent = (toG == null ? '' : 'Hole ' + h.n + ' · no ball marked · ') + 'PLAN your shot, or RECORD to mark your ball · ' + gps; return;
+    sub.textContent = (toG == null ? 'Tee shot' : 'Hole ' + h.n + ' · tee shot') + gTail; return;
   }
   var d = fix ? r0(yd(distM(open, fix))) : null;
-  main.textContent = (d == null ? '—' : d + ' yd') + ' from your ball';
-  sub.textContent = 'Shot ' + h.shots.length + (open.club ? ' · ' + open.club : ' · club not set') + (open.plan ? ' · aimed ' + r0(yd(distM(open, open.plan))) + ' yd' : '') + gTxt + ' · ' + gps;
+  main.textContent = toG != null ? r0(toG) + ' yd to the green'
+                                 : (d == null ? '—' : d + ' yd') + ' from your ball';
+  // no green placed means the headline is already the walk, so do not say it twice
+  var where = phase === 'green' ? 'On the green'
+            : phase === 'walked' ? (toG != null && d != null ? 'Walked ' + d + ' yd' : 'Walking to your ball')
+            : 'At your ball';
+  sub.textContent = where + ' · shot ' + h.shots.length + (open.club ? ' · ' + open.club : '') + gTail;
 }
 
 /* ---------- wake lock ---------- */
@@ -1568,7 +1611,7 @@ function showResult(o){
   var card = $('#resultCard');
   $('#rcMain').textContent = o.main; $('#rcSub').textContent = o.sub || '';
   var ask = $('#rcAsk'), tags = $('#rcTags');
-  ask.hidden = !o.ask; tags.hidden = !o.shot;
+  ask.hidden = !o.ask;
   if (o.ask){
     var clubs = S.settings.clubs;
     $('#rcClubs').innerHTML = clubs.map(function(c, i){ return '<button class="chip" data-i="' + i + '">' + esc(c) + '</button>'; }).join('');
@@ -1581,6 +1624,12 @@ function showResult(o){
       };
     });
   }
+  var tagBtn = $('#rcTagBtn'), tagged = !!(o.shot && (o.shot.strike || (o.shot.miss && o.shot.miss.length)));
+  // the chip rows are two thirds of this card and most shots never get tagged standing over them,
+  // so they stay folded away unless this shot already carries a tag
+  tags.hidden = !o.shot || !tagged;
+  tagBtn.hidden = !o.shot || tagged;
+  tagBtn.onclick = function(){ tags.hidden = false; tagBtn.hidden = true; };
   if (o.shot){
     chips($('#rcStrike'), STRIKES, function(){ return o.shot.strike || null; }, function(v){ o.shot.strike = v; save(); });
     missChips($('#rcMiss'), function(){ return o.shot.miss || []; }, function(v){ o.shot.miss = v; save(); });
@@ -1914,7 +1963,7 @@ function startPlan(){
 function holeKey(){ var r = active(); return (S.activeId || '') + ':' + (r ? r.cur : ''); }
 function endPlan(silent){
   plan = null; aimDragging = false; planKey = null; planLayer.clearLayers(); aimMarker = null;
-  $('#planBtn').classList.remove('on'); $('#planBtn').textContent = 'PLAN'; $('#planBox').hidden = true; $('#statusLine').hidden = false;
+  $('#planBtn').classList.remove('on'); $('#planBtn').textContent = 'AIM'; $('#planBox').hidden = true; $('#statusLine').hidden = false;
   renderStatus();
   if (!silent) updateLive();
 }
@@ -3334,6 +3383,7 @@ $('#pwPlus').onclick = function(){ nudgeWidth(5); };
 $('#planEdit').onclick = function(){ if (plan) openPatternEdit(plan.club); };
 $('#planClubBtn').onclick = function(){ if (plan) renderPlanBox($('#planClubs').hidden); };
 $('#greenBtn').onclick = onGreen;
+$('#holedBtn').onclick = onGreen;
 $('#menuBtn').onclick = openMenu;
 $('#prevHole').onclick = function(){ var r = active(); if (r && r.cur > 0){ r.cur--; save(); renderHole(true); } };
 $('#nextHole').onclick = function(){
