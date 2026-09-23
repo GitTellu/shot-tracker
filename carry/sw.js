@@ -1,7 +1,7 @@
 /* Carry service worker: keeps the app itself available offline. Map tiles, course lookups and
    wind always go to the network; the scope is ./carry/ only, so Shot Tracker is untouched. */
 var CACHE = 'carry-app-v1';
-var SHELL = ['./', './index.html', './styles.css', './geo.js', './baseline.js', './sg.js', './app.js', './manifest.json', './icon.svg'];
+var SHELL = ['./', './index.html', './styles.css', './geo.js', './baseline.js', './sg.js', './app.js', './manifest.json', './icon.svg', './icon-180.png', './icon-512.png'];
 var CDN = ['https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css'];
 
 self.addEventListener('install', function(e){
