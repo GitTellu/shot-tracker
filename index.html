@@ -120,6 +120,18 @@ button{font:inherit;color:inherit;cursor:pointer}
 .planCtl .chip{padding:9px 11px;font-size:15px;flex:none}
 .planCtl .cchip{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #planClubs{margin-top:4px}
+#pmBox{margin-top:6px}
+#pmBox .planHead .pnum{font-size:22px}
+.pmTgt{display:flex;align-items:center;gap:5px;flex:none}
+.pmTgt .lab{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--mut)}
+.pmTgt .chip{padding:6px 11px;font-size:16px}
+.pmTgt b{min-width:20px;text-align:center;font-size:19px;font-variant-numeric:tabular-nums}
+#pmDone{height:40px;width:auto;flex:none;padding:0 16px;font-size:15px}
+#pmSub{white-space:pre-line;line-height:1.35;margin-top:2px;min-height:2.7em}
+#pmTees{margin-top:4px}
+#pmBox .planCtl .chip:disabled{opacity:.4}
+.ritem.pr{display:block;width:100%;text-align:left;font:inherit;color:inherit}
+.tag.off{background:var(--warm);color:var(--warmink);border:1px solid var(--warmline)}
 #planSub{line-height:1.35;margin-top:2px;height:2.7em;overflow:hidden;
  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .pnum{font-size:34px;font-weight:900;line-height:1.05}
@@ -371,6 +383,22 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
     <div class="chips" id="planClubs" hidden></div>
     <button id="goBtn" class="btn pri" style="margin-top:12px">HIT IT</button>
   </div>
+  <div id="pmBox" hidden>
+    <div class="planHead">
+      <div id="pmNum" class="pnum">Hole 1</div>
+      <div class="pmTgt"><span class="lab">Target</span><button id="pmScMinus" class="chip" aria-label="Lower target score">&minus;</button><b id="pmScore">&mdash;</b><button id="pmScPlus" class="chip" aria-label="Higher target score">+</button></div>
+      <button id="pmDone" class="btn pri">Done</button>
+    </div>
+    <div class="psub" id="pmSub"></div>
+    <div class="chips" id="pmTees"></div>
+    <div class="planCtl">
+      <button id="pmClubBtn" class="chip cchip">Club</button>
+      <button id="pmPat" class="chip ichip" title="Shot pattern" aria-label="Shot pattern"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.2"/></svg></button>
+      <button id="pmAdd" class="chip">+ Shot</button>
+      <button id="pmDel" class="chip">Remove</button>
+    </div>
+    <div class="chips" id="pmClubs" hidden></div>
+  </div>
   <div class="actions" id="actions">
     <button id="planBtn" class="btn plan">AIM</button>
     <button id="recBtn" class="btn pri">MARK BALL</button>
@@ -472,7 +500,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.23.0', SCHEMA = 6;
+var APP_VERSION = '1.24.0', SCHEMA = 7;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -481,6 +509,8 @@ function normalize(j){
   j.courses = j.courses || []; // v1.5: greens you place yourself, kept per course and reused every round
   // v1.23 (schema 6): a course may also carry osm (where it came from), geo (holes, green outlines,
   // tee boxes and hazards from OpenStreetMap) and fb (front and back edges placed by hand). All optional.
+  // v1.24 (schema 7): a course may carry plan (the game plan, hole by hole), and a round the copy of
+  // each hole's plan it was played with (r.plan), so later edits never rewrite a round. Optional too.
   if (!('playingId' in j)) j.playingId = null;
   if ((j.schema || 1) < 3) j.settings.wake = false; // v1.1: the phone can sleep between shots by default
   j.schema = SCHEMA;
@@ -584,7 +614,7 @@ function migrateFromLocal(){
 if (bc) bc.onmessage = function(){
   store.get('state').then(function(st){
     if (!st) return;
-    S = normalize(st); trails = {}; trailState = {};
+    S = normalize(st); trails = {}; trailState = {}; pmRebind();
     setBase(); renderHole(false);
     toast('Updated with changes from another open copy of the app.');
   });
@@ -713,7 +743,8 @@ function onPos(p, requested){
     // step at least the reported accuracy, so GPS jitter while standing still doesn't pile up points
     if (!last || distM({lat:last[0], lng:last[1]}, fix) >= Math.max(TRAIL_MIN_STEP_M, fix.acc)){
       tr.push([+fix.lat.toFixed(7), +fix.lng.toFixed(7), Math.round(fix.t/1000)]);
-      trailLine.addLatLng(ll); trailDirty = true;
+      if (!pm) trailLine.addLatLng(ll);
+      trailDirty = true;
     }
   }
   gpsPill(); updateLive(); maybeAutoPoint(); feedStop(); updateAutoBearing(); maybeAutoFit();
@@ -860,8 +891,8 @@ function shotPhase(h, open){
 /* One primary button, and it is whatever you are about to do. */
 function renderActions(h){
   var pb = $('#planBtn'), rb = $('#recBtn'), hb = $('#holedBtn');
-  $('#actions').hidden = !!plan;
-  if (plan) return;
+  $('#actions').hidden = !!plan || !!pm;
+  if (plan || pm) return;
   var green = phase === 'green' && h && h.shots.length;
   hb.hidden = !green;
   pb.hidden = !!green;
@@ -899,9 +930,11 @@ function renderStatus(){
     sub.textContent = plural(h.shots.length, 'shot') + ' · ' + plural(puttCount(h), 'putt') +
       (penTotal(cardOf(h)) ? ' · ' + plural(penTotal(cardOf(h)), 'penalty', 'penalties') : '') + ' · tap the flag to edit · ' + gps; return;
   }
+  var rpl = planForHole(rr, h, false), nextP = rpl && rpl.shots[h.shots.length];
+  var pTail = nextP ? ' · plan: ' + nextP.club : '';
   if (!open){
     main.textContent = toG == null ? 'Hole ' + h.n + ' · no ball marked' : ydLabel(toG) + ' to the green';
-    sub.textContent = (toG == null ? 'Tee shot' : 'Hole ' + h.n + ' · tee shot') + gTail; return;
+    sub.textContent = (toG == null ? 'Tee shot' : 'Hole ' + h.n + ' · tee shot') + pTail + gTail; return;
   }
   var d = fix ? r0(yd(distM(open, fix))) : null;
   main.textContent = toG != null ? ydLabel(toG) + ' to the green'
@@ -910,7 +943,7 @@ function renderStatus(){
   var where = phase === 'green' ? 'On the green'
             : phase === 'walked' ? (toG != null && d != null ? 'Walked ' + d + ' yd' : 'Walking to your ball')
             : 'At your ball';
-  sub.textContent = where + ' · shot ' + h.shots.length + (open.club ? ' · ' + open.club : '') + gTail;
+  sub.textContent = where + ' · shot ' + h.shots.length + (open.club ? ' · ' + open.club : '') + (phase === 'green' ? '' : pTail) + gTail;
 }
 
 /* ---------- wake lock ---------- */
@@ -973,6 +1006,7 @@ window.__feedStop = feedStop;
 window.__maybeAutoPoint = maybeAutoPoint; // exposed for testing
 function renderPoints(){
   pointLayer.clearLayers();
+  if (pm) return;
   var r = active(); if (!r || !r.points) return;
   r.points.forEach(function(p, i){
     if (p[4] !== r.cur) return;
@@ -1038,12 +1072,14 @@ function applyRotation(light){
   if (map.dragging){ if (bearing) map.dragging.disable(); else map.dragging.enable(); }
   if (aimMarker && aimMarker.dragging){ if (bearing) aimMarker.dragging.disable(); else aimMarker.dragging.enable(); }
   if (placing && placing.marker && placing.marker.dragging){ if (bearing) placing.marker.dragging.disable(); else placing.marker.dragging.enable(); }
+  pmLayer.eachLayer(function(l){ if (l.options.pmDrag && l.dragging){ if (bearing) l.dragging.disable(); else l.dragging.enable(); } });
   $('#rotBtn').textContent = rotMode === 'north' ? 'N' : (bearing ? r0(bearing) + '°' : ROT_LABEL[rotMode]);
   $('#rotBtn').classList.toggle('on', rotMode !== 'north');
   map.invalidateSize();
   relabel();
 }
 function autoBearing(){
+  if (pm){ var s0 = planStartOf(pm.c, pm.n), g0 = pm.c.greens && pm.c.greens[pm.n]; return s0 && g0 ? bearingDeg(s0, g0) : null; } // planning: the hole plays up the screen
   var g = greenFor(curHole()); // the hole's own line: you to the green
   if (g && fix && distM(fix, g) > 20) return bearingDeg({lat:fix.lat, lng:fix.lng}, g);
   if (plan && fix) return bearingDeg({lat:fix.lat, lng:fix.lng}, plan.aim);
@@ -1376,7 +1412,7 @@ function fitHole(){
 }
 window.__fitOpts = fitOpts;
 function maybeAutoFit(){
-  if (follow || placing || aimDragging || !fix || !booted || awayFromCourse()) return;
+  if (pm || follow || placing || aimDragging || !fix || !booted || awayFromCourse()) return;
   var g = greenFor(curHole()); if (!g) return;
   if (Date.now() - mapTouchedAt < 10000 || Date.now() - autoFitAt < 8000) return;
   var d = distM(fix, g);
@@ -1868,7 +1904,7 @@ window.__declutter = declutter; window.__relabel = relabel;
    the map. Planning hides it too, because the plan box says all of the same things. */
 function applyPeek(){
   var on = !!(S.settings && S.settings.peek);
-  $('#statusLine').hidden = on || !!plan;
+  $('#statusLine').hidden = on || !!plan || !!pm;
   $('#grip').setAttribute('aria-expanded', on ? 'false' : 'true');
   layout();
 }
@@ -1914,6 +1950,8 @@ function fitOpts(maxZoom){
 }
 function renderHole(fit){
   if (plan && planKey !== holeKey()) endPlan(true);
+  if (pm){ renderPlanMode(fit); return; }
+  pmLayer.clearLayers();
   holeLayer.clearLayers(); markers = {};
   var r = active(), h = curHole();
   courseAttr(courseFor(false));
@@ -1949,6 +1987,7 @@ function renderHole(fit){
     if (geo && geo.green) L.polygon(geo.green, {color:'#ffffff', weight:1.5, opacity:0.85, fill:false, dashArray:'3 4', interactive:false}).addTo(holeLayer);
     if (geo) geo.tees.forEach(function(t){ L.marker(t.c, {icon:teeIcon, interactive:false, keyboard:false}).addTo(holeLayer); });
     if (!(geo && geo.green) && rc && rc.fb && rc.fb[h.n]) ['f', 'b'].forEach(function(k){ var q = rc.fb[h.n][k]; if (q) L.marker([q.lat, q.lng], {icon:fbIcon, interactive:false}).addTo(holeLayer); });
+    drawRoundPlan(h);
     if (cg && !(placing && placing.n === h.n && placing.kind === 'green')){
       var cm = L.marker([cg.lat, cg.lng], {icon:greenIcon, zIndexOffset:900}).addTo(holeLayer);
       cm.bindTooltip('<span class="urot">' + greenLabel() + '</span>', {permanent:true, direction:'top', offset:[0,-15], className:'dtip p1'});
@@ -1986,6 +2025,7 @@ function greenLabel(){
   return d == null ? 'green' : ydLabel(d);
 }
 function updateLive(){
+  if (pm){ liveLine.setLatLngs([]); return; }
   var h = curHole(), open = openShot(h);
   if (open && fix) liveLine.setLatLngs([[open.lat, open.lng], [fix.lat, fix.lng]]);
   else liveLine.setLatLngs([]);
@@ -2146,6 +2186,7 @@ function markBall(opts){
       return {h:h, shot:last, closed:null, pos:pos, remarked:true, opts:opts};
     }
     var closed = openShot(h);
+    planForHole(r, h, true);   // playing a planned hole: the round keeps the plan as it stood
     var shot = Object.assign({id:uid(), club:(opts && opts.club) || null, lie:h.shots.length === 0 ? 'Tee' : null,
       lat:pos.lat, lng:pos.lng, acc:pos.acc, n:pos.n, t:Date.now(), strike:null, miss:[], excluded:false}, gpsQ(pos));
     if (pos.locked) shot.lockS = pos.lockS;
@@ -2178,6 +2219,7 @@ function onRecord(){
 function onPlanGo(){
   if (!plan) return;
   var p = {lat:plan.aim.lat, lng:plan.aim.lng, club:plan.club, shape:plan.pat.shape, L:plan.pat.L, R:plan.pat.R, S:plan.pat.S, G:plan.pat.G};
+  if (plan.rp) p.rp = {k:plan.rp.k, club:plan.rp.club, lat:plan.rp.lat, lng:plan.rp.lng};
   var club = plan.club;
   markBall({plan:p, club:club}).then(function(res){
     if (!res) return;
@@ -2582,7 +2624,12 @@ function startPlan(){
   var st = planStart();
   if (!st){ toast('Waiting for GPS. Planning measures from where you are standing.'); return; }
   var h = curHole(), g = greenFor(h), aim;
-  if (g){
+  // a round plan for this hole: the next planned shot, measured from where the ball really is
+  var rp = planForHole(active(), h, true), k = h ? h.shots.length : 0, ps = rp && rp.shots[k];
+  if (rp) save();
+  if (ps){
+    aim = {lat:ps.lat, lng:ps.lng};
+  } else if (g){
     aim = {lat:g.lat, lng:g.lng};   // the green is what you are playing to until you say otherwise
   } else {
     // no green placed: the map centre if it is a sensible distance away, otherwise a point up-screen
@@ -2597,12 +2644,19 @@ function startPlan(){
   plan = {aim:aim, club:(h && h.shots.length) ? S.settings.clubs[Math.min(6, S.settings.clubs.length - 1)] : last, pat:null};
   var sug = suggestClub(yd(distM(st, aim))); if (sug) plan.club = sug.club;
   plan.pat = patYards(patternFor(plan.club));
+  if (ps){
+    plan.club = ps.club; plan.pat = {shape:ps.shape, L:ps.L, R:ps.R, S:ps.S, G:ps.G};
+    plan.rp = {k:k, n:rp.shots.length, club:ps.club, lat:ps.lat, lng:ps.lng};
+  }
   follow = false; planKey = holeKey();
   $('#planBtn').classList.add('on'); $('#planBtn').textContent = 'CANCEL'; applyPeek();
   if (g) setRotation('auto', true);   // turn the hole to run up the screen; our own toast says so
   renderPlanBox(!plan.club); drawPlan(); updateAutoBearing(true);
   if (g) fitHole();
-  toast((g ? 'Aimed at the centre of the green, hole running up the screen. Drag the target to change it. '
+  if (ps) toast('Your plan, shot ' + (k + 1) + ' of ' + rp.shots.length + ': ' + ps.club + ' to the target, ' + r0(yd(distM(st, aim))) + ' yd from here. ' +
+                'Drag it or change club to play something else; the review will show you did.', 5500);
+  else toast((rp ? 'Past your plan for this hole (' + plural(rp.shots.length, 'shot') + '). ' : '') +
+        (g ? 'Aimed at the centre of the green, hole running up the screen. Drag the target to change it. '
            : 'Drag the target, or tap the map, to set your aim. ') +
         'HIT IT then marks your ball here and remembers the target.', 5000);
 }
@@ -2614,7 +2668,7 @@ function endPlan(silent){
   if (!silent) updateLive();
 }
 function setAim(ll){ if (!plan) return; plan.aim = {lat:ll.lat, lng:ll.lng}; drawPlan(); renderPlanInfo(); }
-map.on('click', function(e){ if (placing){ placeGreenMarker(e.latlng); return; } if (plan) setAim(e.latlng); });
+map.on('click', function(e){ if (pm){ pmTap(e.latlng); return; } if (placing){ placeGreenMarker(e.latlng); return; } if (plan) setAim(e.latlng); });
 map.on('moveend zoomend', relabel);
 window.__tapMap = function(lat, lng){ map.fire('click', {latlng:L.latLng(lat, lng)}); }; // exposed for testing
 
@@ -2698,7 +2752,14 @@ function renderPlanInfo(){
   else {
     var lv = toGreenYd(plan.aim), h = curHole(), lf = h ? fcbFor(plan.aim, courseFor(false), h.n) : null;
     var fbT = lf && lf.f != null && lf.b != null ? ' (F ' + r0(lf.f) + ' B ' + r0(lf.b) + ')' : '';
-    sub.textContent = (lv == null ? '' : 'leaves ' + r0(lv) + ' yd' + fbT + ' to the green · ') + patShort(plan.pat)
+    var ch = '';
+    if (plan.rp){
+      var mv = yd(distM(plan.aim, plan.rp));
+      ch = plan.club !== plan.rp.club || mv > AIM_MOVED_YD
+        ? 'Changed from plan (' + (plan.club !== plan.rp.club ? plan.rp.club : '') + (plan.club !== plan.rp.club && mv > AIM_MOVED_YD ? ', ' : '') + (mv > AIM_MOVED_YD ? 'target ' + r0(mv) + ' yd away' : '') + ') · '
+        : 'Plan shot ' + (plan.rp.k + 1) + ' of ' + plan.rp.n + ' · ';
+    }
+    sub.textContent = ch + (lv == null ? '' : 'leaves ' + r0(lv) + ' yd' + fbT + ' to the green · ') + patShort(plan.pat)
       + (sug ? ' · your ' + sug.club + ' median ' + r0(sug.median) + ' yd' : '');
   }
   Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){ b.classList.toggle('sug', !!sug && b.textContent === sug.club); });
@@ -2755,10 +2816,361 @@ function openPatternEdit(club){
   el.querySelector('#savep').onclick = function(){
     draw(); S.settings.patterns[club] = p; save(); closeSheet(true);
     if (plan && plan.club === club){ plan.pat = patYards(p); renderPlanBox(false); drawPlan(); }
+    if (pm){ pmRefreshPattern(club); renderHole(false); }
     toast('Pattern saved for ' + club);
   };
   draw();
 }
+
+/* ---------- planning the round ----------
+   A game plan made before the round, hole by hole: from the tee box you will play, each shot as a
+   club and a target with that club's pattern drawn from where the last one leaves you, to the
+   green, and the score you are playing for. It is kept on the course, so it can be made from the
+   sofa and changed until you tee off. Out on the course AIM loads the planned shot, measured from
+   where your ball really is, and anything you change is recorded, so afterwards the round can be
+   read against the plan: where the strategy held, and where it cost or saved you strokes.
+   Each hole's plan is copied into the round the moment you play it, so later edits never
+   rewrite a round already played. */
+var pm = null;            // {c: course, n: hole number, sel: selected shot index, setStart: next tap sets the tee}
+var pmLayer = L.layerGroup().addTo(map), pmPrevRot = null;
+window.__pm = function(){ return pm; };
+function planHoleOf(c, n, create){
+  if (!c) return null;
+  if (!c.plan && create) c.plan = {holes:{}, t:Date.now()};
+  var hs = c.plan && c.plan.holes; if (!hs) return null;
+  if (!hs[n] && create) hs[n] = {tee:null, start:null, shots:[], score:null};
+  return hs[n] || null;
+}
+function teeFor(c, n){
+  var geo = geoOf(c, n), ph = planHoleOf(c, n, false), ts = geo ? geo.tees : [];
+  if (!ts.length || (ph && ph.start)) return null;
+  var byId = ph && ph.tee ? ts.filter(function(t){ return t.id === ph.tee; })[0] : null;
+  if (byId) return byId;
+  var want = c.plan && c.plan.teeLabel;   // the tee you picked on earlier holes, where this hole has one
+  return (want && ts.filter(function(t){ return t.label === want; })[0]) || ts[0];
+}
+/* Where a hole's plan starts: the tee box you picked, a spot you tapped, or the tee end of the hole's line. */
+function planStartOf(c, n){
+  var ph = planHoleOf(c, n, false), t = teeFor(c, n), geo = geoOf(c, n);
+  if (ph && ph.start) return ph.start;
+  if (t) return llOf(t.c);
+  if (geo && geo.line && geo.line.length) return llOf(geo.line[0]);
+  return null;
+}
+function holeLenYd(c, n, from){
+  var g = c.greens && c.greens[n], geo = geoOf(c, n); if (!g || !from) return null;
+  if (geo && geo.line && geo.line.length >= 2){   // along the hole's line, the way a card measures a dogleg
+    var li = lineInfo(from, geo.line);
+    if (li.off < 40) return yd(li.off + li.total - li.along);
+  }
+  return yd(distM(from, g));
+}
+function pmShotPat(club){ var q = patYards(patternFor(club)); return {shape:q.shape, L:q.L, R:q.R, S:q.S, G:q.G}; }
+/* A new shot goes on to the green if your longest club with any data reaches it, and otherwise
+   down the hole's line by that club's median. With no data yet it uses 230 yd as a starting guess
+   and says so: the point is for you to drag it where you mean to play. */
+function pmNewShot(c, n, from){
+  var g = c.greens[n], rem = yd(distM(from, g)), geo = geoOf(c, n);
+  var st = computeStats(S.rounds, false).filter(function(x){ return x.n >= 3; });
+  var reach = st.length ? Math.max.apply(null, st.map(function(x){ return x.median; })) : null;
+  var long = reach == null ? 230 : reach, aim, club, guess = false;
+  if (rem <= long + 10){
+    aim = {lat:g.lat, lng:g.lng};
+    var sg = suggestClub(rem); club = sg ? sg.club : S.settings.clubs[Math.min(6, S.settings.clubs.length - 1)];
+  } else {
+    var d = Math.min(long, rem - 30) * M_PER_YD;
+    if (geo && geo.line && geo.line.length >= 2){
+      var li = lineInfo(from, geo.line);
+      aim = pointAlong(geo.line, li.along + d);
+    } else { var G = toXY(from, g), L0 = Math.hypot(G.x, G.y); aim = fromXY(from, G.x / L0 * d, G.y / L0 * d); }
+    var s2 = suggestClub(d / M_PER_YD); club = s2 ? s2.club : S.settings.clubs[0];
+    guess = reach == null;   // only a lay-up spot is a guess; the green centre is not
+  }
+  var p = pmShotPat(club);
+  return {club:club, lat:+aim.lat.toFixed(7), lng:+aim.lng.toFixed(7), shape:p.shape, L:p.L, R:p.R, S:p.S, G:p.G, guess:guess};
+}
+function pmRebind(){
+  if (!pm) return;
+  var c = findCourse(pm.c.id);
+  if (c){ pm.c = c; return; }
+  pm = null; pmLayer.clearLayers(); $('#pmBox').hidden = true; $('#actions').hidden = false; applyPeek();
+}
+function openPlanRound(){
+  var r = active(), rc = (r && !r.ended) ? courseFor(false) : null;
+  var list = coursesByDistance().map(function(x){ return x.c; });
+  if (rc && Object.keys(rc.greens || {}).length) list = [rc].concat(list.filter(function(c){ return c !== rc; }));   // the course you are playing first
+  if (!list.length){ toast('Import the course or place its greens first: a plan plays to the greens.', 4500); return; }
+  var startN = function(c){ return c === rc && curHole() ? curHole().n : 1; };
+  if (list.length === 1){ enterPlanMode(list[0], startN(list[0])); return; }
+  var el = openSheet('<h3>Plan a round</h3><div class="sub">Which course?</div><div class="mgrp">' + list.map(function(c, i){
+    return '<button class="mrow" data-i="' + i + '">' + icon(c.osm ? 'globe' : 'flag') + '<span>' + esc(c.name || 'Course') +
+      (c === rc ? '<br><small style="color:var(--mut);font-weight:600">the round you are playing</small>' : '') + '</span><span class="mchev">›</span></button>';
+  }).join('') + '</div><div class="stack"><button class="btn ghost" id="close">Cancel</button></div>');
+  Array.prototype.forEach.call(el.querySelectorAll('.mrow'), function(b){ b.onclick = function(){ var c = list[+b.dataset.i]; closeSheet(true); enterPlanMode(c, startN(c)); }; });
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+function enterPlanMode(c, n){
+  if (plan) endPlan(true);
+  if (placing) endPlaceGreen();
+  hideResult(); closeSheet(true);
+  pm = {c:c, n:n || 1, sel:-1, setStart:false};
+  pmPrevRot = rotMode; follow = false;
+  $('#pmBox').hidden = false; $('#actions').hidden = true; $('#planBox').hidden = true; applyPeek();
+  setRotation('auto', true);
+  renderHole(true);
+  toast(c.greens && c.greens[pm.n] ? 'Planning ' + (c.name || 'the course') + '. Tap the map to place a target; the arrows at the top step through the holes.'
+                                   : 'No green on this hole yet: step to a hole with one, or place it first.', 5000);
+}
+function exitPlanMode(){
+  if (!pm) return;
+  var c = pm.c, planned = c.plan ? Object.keys(c.plan.holes).filter(function(k){ return c.plan.holes[k].shots.length; }).length : 0;
+  pm = null; pmLayer.clearLayers();
+  $('#pmBox').hidden = true; $('#actions').hidden = false; applyPeek();
+  setRotation(pmPrevRot || 'north', true);
+  renderHole(true);
+  toast(planned ? 'Plan saved: ' + plural(planned, 'hole') + ' at ' + (c.name || 'this course') + '. AIM loads it when you play.' : 'Nothing planned yet.', 4000);
+}
+function pmStep(d){
+  if (!pm) return;
+  var top = 18; Object.keys(pm.c.geo || {}).forEach(function(k){ top = Math.max(top, +k); });
+  var n = pm.n + d; if (n < 1 || n > top) return;
+  pm.n = n; pm.sel = -1; pm.setStart = false;
+  updateAutoBearing(true); renderHole(true);
+}
+function pmTap(ll){
+  var c = pm.c, n = pm.n;
+  if (pm.setStart || !planStartOf(c, n)){
+    var ph0 = planHoleOf(c, n, true); ph0.start = {lat:+ll.lat.toFixed(7), lng:+ll.lng.toFixed(7)}; ph0.tee = null; pm.setStart = false;
+    save(); updateAutoBearing(true); renderHole(false); toast('Tee set. Now tap where you want the first shot to finish.'); return;
+  }
+  if (!(c.greens && c.greens[n])){ toast('This hole has no green yet. Place it, or import the course, first.'); return; }
+  var ph = planHoleOf(c, n, true);
+  if (!ph.shots.length){ var s = pmNewShot(c, n, planStartOf(c, n)); s.lat = +ll.lat.toFixed(7); s.lng = +ll.lng.toFixed(7); ph.shots.push(s); pm.sel = 0; }
+  else { var i = pm.sel >= 0 ? pm.sel : ph.shots.length - 1; ph.shots[i].lat = +ll.lat.toFixed(7); ph.shots[i].lng = +ll.lng.toFixed(7); pm.sel = i; }
+  if (ph.score == null && c.pars && c.pars[n]) ph.score = c.pars[n];
+  save(); renderHole(false);
+}
+function pmAdd(){
+  var c = pm.c, n = pm.n, g = c.greens && c.greens[n];
+  if (!g){ toast('This hole has no green yet. Place it, or import the course, first.'); return; }
+  var from0 = planStartOf(c, n);
+  if (!from0){ pm.setStart = true; toast('First tap the map where you will tee off.'); return; }
+  var ph = planHoleOf(c, n, true), last = ph.shots[ph.shots.length - 1], from = last || from0;
+  if (last && yd(distM(last, g)) < 3){ toast('Your plan already finishes on the green. Drag a target to change it.'); return; }
+  var s = pmNewShot(c, n, from); ph.shots.push(s); pm.sel = ph.shots.length - 1;
+  if (ph.score == null && c.pars && c.pars[n]) ph.score = c.pars[n];
+  save(); renderHole(false);
+  if (s.guess) toast('No club data yet, so this target is a starting guess. Drag it where you mean to play.', 3500);
+}
+function pmDel(){
+  var ph = planHoleOf(pm.c, pm.n, false); if (!ph || !ph.shots.length) return;
+  var i = pm.sel >= 0 ? pm.sel : ph.shots.length - 1;
+  ph.shots.splice(i, 1); pm.sel = Math.min(i, ph.shots.length - 1);
+  save(); renderHole(false);
+}
+function pmSetClub(club){
+  var ph = planHoleOf(pm.c, pm.n, false); if (!ph || !ph.shots.length) return;
+  var i = pm.sel >= 0 ? pm.sel : ph.shots.length - 1, p = pmShotPat(club);
+  Object.assign(ph.shots[i], {club:club, shape:p.shape, L:p.L, R:p.R, S:p.S, G:p.G});
+  save(); renderHole(false);
+}
+/* A planned shot keeps the pattern its club had when you planned it, so a round played months
+   later is judged against what you meant at the time. Editing the pattern while planning is you
+   changing your mind, so it updates this course's planned shots with that club. */
+function pmRefreshPattern(club){
+  var hs = pm && pm.c.plan && pm.c.plan.holes, p = pmShotPat(club); if (!hs) return;
+  Object.keys(hs).forEach(function(k){ hs[k].shots.forEach(function(s){ if (s.club === club) Object.assign(s, {shape:p.shape, L:p.L, R:p.R, S:p.S, G:p.G}); }); });
+  save();
+}
+function openPlanPicker(){
+  var c = pm.c, grid = '';
+  for (var n = 1; n <= 18; n++){
+    var ph = planHoleOf(c, n, false), has = ph && ph.shots.length, gr = c.greens && c.greens[n];
+    grid += '<button class="chip' + (n === pm.n ? ' on' : '') + (has ? ' sug' : '') + '" data-n="' + n + '"' + (gr ? '' : ' style="opacity:.45"') + '>' + n + '</button>';
+  }
+  var el = openSheet('<h3>Plan a hole</h3><div class="sub">Outlined holes have a plan. Faded ones have no green yet.</div><div class="holegrid">' + grid + '</div>' +
+    '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+  Array.prototype.forEach.call(el.querySelectorAll('.holegrid .chip'), function(b){
+    b.onclick = function(){ closeSheet(true); pm.n = +b.dataset.n; pm.sel = -1; pm.setStart = false; updateAutoBearing(true); renderHole(true); };
+  });
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+function pmScore(d){
+  var c = pm.c, n = pm.n, ph = planHoleOf(c, n, true), par = c.pars && c.pars[n];
+  var v = (ph.score == null ? (par || 4) : ph.score) + d;
+  ph.score = Math.max(1, Math.min(12, v)); save(); renderPmBox();
+}
+function pmSetTee(t){
+  var ph = planHoleOf(pm.c, pm.n, true);
+  if (t){ ph.tee = t.id; ph.start = null; pm.c.plan.teeLabel = t.label; pm.setStart = false; }
+  else { pm.setStart = true; toast('Tap the map where you will tee off.'); }
+  save(); updateAutoBearing(true); renderHole(false);
+}
+function renderPlanMode(fit){
+  holeLayer.clearLayers(); markers = {}; pmLayer.clearLayers(); pointLayer.clearLayers();
+  trailLine.setLatLngs([]); liveLine.setLatLngs([]);
+  var c = pm.c, n = pm.n, g = c.greens && c.greens[n], geo = geoOf(c, n), ph = planHoleOf(c, n, false);
+  courseAttr(c);
+  $('#holeLabel').textContent = 'Plan · ' + n;
+  if (geo && geo.green) L.polygon(geo.green, {color:'#ffffff', weight:1.5, opacity:0.85, fill:false, dashArray:'3 4', interactive:false}).addTo(pmLayer);
+  if (g) L.marker([g.lat, g.lng], {icon:greenIcon, interactive:false, zIndexOffset:900}).addTo(pmLayer);
+  var tee = teeFor(c, n), start = planStartOf(c, n);
+  (geo ? geo.tees : []).forEach(function(t){
+    L.marker(t.c, {icon:tee && tee.id === t.id ? teeOnIcon : teeIcon, zIndexOffset:tee && tee.id === t.id ? 950 : 800}).addTo(pmLayer)
+      .on('click', function(){ pmSetTee(t); });
+  });
+  if (start && !tee) L.marker([start.lat, start.lng], {icon:teeOnIcon, interactive:false, zIndexOffset:950}).addTo(pmLayer);
+  var shots = ph ? ph.shots : [], prev = start, pts = [];
+  if (start) pts.push([start.lat, start.lng]);
+  if (g) pts.push([g.lat, g.lng]);
+  var sel = pm.sel >= 0 ? pm.sel : shots.length - 1;
+  shots.forEach(function(s, i){
+    if (!prev) return;
+    var on = i === sel, from = prev;
+    var poly = patternPolygon(from, s, s);
+    if (poly.length) L.polygon(poly, {color:'#ff9800', weight:on ? 2 : 1, opacity:on ? 1 : 0.7, fillColor:'#ff9800', fillOpacity:on ? 0.18 : 0.07, interactive:false}).addTo(pmLayer);
+    L.polyline([[from.lat, from.lng], [s.lat, s.lng]], {color:'#ffffff', weight:on ? 3 : 2, opacity:0.95, interactive:false})
+      .bindTooltip('<span class="urot">' + r0(yd(distM(from, s))) + ' yd · ' + esc(s.club) + '</span>', {permanent:true, direction:'center', className:'dtip ' + (on ? 'p1' : 'p2')}).addTo(pmLayer);
+    var m = L.marker([s.lat, s.lng], {icon:on ? aimIcon : aimDoneIcon, draggable:!bearing, pmDrag:true, zIndexOffset:on ? 2000 : 1500}).addTo(pmLayer);
+    var moveTo = function(ll){ s.lat = +ll.lat.toFixed(7); s.lng = +ll.lng.toFixed(7); };
+    // the drag helper keeps clicks on the marker from reaching the map, so listen on the marker itself
+    var me = m.getElement && m.getElement();
+    if (me) me.addEventListener('click', function(){ if (pm && pm.sel !== i){ pm.sel = i; renderHole(false); } });
+    m.on('dragstart', function(){ pm.sel = i; });
+    m.on('drag', function(e){ moveTo(e.target.getLatLng()); });
+    m.on('dragend', function(){ save(); renderHole(false); });
+    attachRotDrag(m, {start:function(){ pm.sel = i; }, move:moveTo, end:function(){ save(); renderHole(false); }});
+    pts.push([s.lat, s.lng]); prev = s;
+  });
+  if (g && prev && shots.length && yd(distM(prev, g)) >= 3)
+    L.polyline([[prev.lat, prev.lng], [g.lat, g.lng]], {color:'#ffffff', weight:2, dashArray:'5 6', opacity:0.9, interactive:false})
+      .bindTooltip('<span class="urot">' + r0(yd(distM(prev, g))) + ' yd to green</span>', {permanent:true, direction:'center', className:'dtip p1'}).addTo(pmLayer);
+  if (fit && pts.length >= 2){ map.fitBounds(pts, fitOpts(19)); autoFitAt = Date.now(); }
+  else if (fit && pts.length === 1) map.setView(pts[0], Math.max(map.getZoom(), 16));
+  renderPmBox(); relabel();
+}
+function renderPmBox(){
+  if (!pm) return;
+  var c = pm.c, n = pm.n, g = c.greens && c.greens[n], geo = geoOf(c, n), ph = planHoleOf(c, n, false);
+  var par = c.pars && c.pars[n], start = planStartOf(c, n), tee = teeFor(c, n), len = holeLenYd(c, n, start);
+  var shots = ph ? ph.shots : [], sel = pm.sel >= 0 ? pm.sel : shots.length - 1, s = shots[sel];
+  $('#pmNum').textContent = 'Hole ' + n;
+  $('#pmScore').textContent = ph && ph.score != null ? ph.score : (par || '—');
+  var line1 = !g ? 'No green on this hole yet. Place it or import the course to plan it.'
+    : !start ? 'Tap the map where you will tee off.'
+    : (par ? 'Par ' + par + ' · ' : '') + (len != null ? r0(len) + ' yd' : '') + (tee ? ' from ' + tee.label : start ? ' from your tee' : '') +
+      (shots.length ? ' · ' + plural(shots.length, 'shot') + ' to the green' + (yd(distM(shots[shots.length - 1], g)) >= 3 ? ' (not there yet)' : '') : ' · tap the map for your first target');
+  var line2 = '';
+  if (s && g){
+    var from = sel > 0 ? shots[sel - 1] : start, lv = yd(distM(s, g)), fb = fcbFor(s, c, n);
+    line2 = 'Shot ' + (sel + 1) + ': ' + s.club + ' ' + r0(yd(distM(from, s))) + ' yd' +
+      (lv >= 3 ? ', leaves ' + r0(lv) + (fb && fb.f != null ? ' (F ' + r0(fb.f) + ' B ' + r0(fb.b) + ')' : '') : ', on the green') +
+      ' · ' + patShort(s);
+  }
+  $('#pmSub').textContent = line1 + (line2 ? '\n' + line2 : '');
+  var ts = geo ? geo.tees : [];
+  $('#pmTees').innerHTML = ts.map(function(t, i){
+    return '<button class="chip' + (tee && tee.id === t.id ? ' on' : '') + '" data-i="' + i + '">' + esc(t.label) + ' ' + r0(holeLenYd(c, n, llOf(t.c)) || 0) + '</button>';
+  }).join('') + '<button class="chip' + (!tee && ph && ph.start ? ' on' : '') + '" data-i="-1">' + (ts.length ? 'Another spot' : 'Set the tee') + '</button>';
+  Array.prototype.forEach.call($('#pmTees').querySelectorAll('.chip'), function(b){ b.onclick = function(){ var i = +b.dataset.i; pmSetTee(i >= 0 ? ts[i] : null); }; });
+  $('#pmClubBtn').textContent = (s ? s.club : 'Club') + ' ▾';
+  $('#pmClubBtn').disabled = !s; $('#pmDel').disabled = !s;
+  var box = $('#pmClubs'), clubs = S.settings.clubs;
+  box.innerHTML = clubs.map(function(cl, i){ return '<button class="chip' + (s && cl === s.club ? ' on' : '') + '" data-i="' + i + '">' + esc(cl) + '</button>'; }).join('');
+  Array.prototype.forEach.call(box.querySelectorAll('.chip'), function(b){ b.onclick = function(){ box.hidden = true; pmSetClub(clubs[+b.dataset.i]); }; });
+  layout();
+}
+
+/* The plan for the hole you are playing: the round's own copy once the hole has been started,
+   otherwise the course's current plan. snap copies it into the round. */
+function planForHole(r, h, snap){
+  if (!r || !h) return null;
+  if (r.plan && r.plan[h.n]) return r.plan[h.n];
+  var c = courseFor(false), ph = planHoleOf(c, h.n, false), g = c && c.greens && c.greens[h.n];
+  if (!ph || !ph.shots.length || !g) return null;
+  var st = planStartOf(c, h.n), t = teeFor(c, h.n);
+  var cp = {start:st ? {lat:st.lat, lng:st.lng} : null, tee:t ? t.label : null, green:{lat:g.lat, lng:g.lng}, score:ph.score,
+    shots:ph.shots.map(function(s){ return {club:s.club, lat:s.lat, lng:s.lng, shape:s.shape, L:s.L, R:s.R, S:s.S, G:s.G}; }), t:Date.now()};
+  if (snap && !r.ended){ r.plan = r.plan || {}; r.plan[h.n] = cp; }
+  return cp;
+}
+window.__planForHole = function(){ return planForHole(active(), curHole(), false); };
+/* the planned chain, drawn faintly under the round so the strategy is always in view */
+function drawRoundPlan(h){
+  var rp = planForHole(active(), h, false); if (!rp) return;
+  var pts = (rp.start ? [[rp.start.lat, rp.start.lng]] : []).concat(rp.shots.map(function(s){ return [s.lat, s.lng]; }));
+  if (yd(distM(rp.shots[rp.shots.length - 1], rp.green)) >= 3) pts.push([rp.green.lat, rp.green.lng]);
+  L.polyline(pts, {color:'#ff9800', weight:2, opacity:0.7, dashArray:'2 6', interactive:false}).addTo(holeLayer);
+  rp.shots.forEach(function(s){ L.circleMarker([s.lat, s.lng], {radius:5, color:'#ff9800', weight:2, fillColor:'#ffffff', fillOpacity:0.9, interactive:false}).addTo(holeLayer); });
+}
+
+/* ---------- the plan against what happened ---------- */
+var AIM_MOVED_YD = 5;
+function planReport(r){
+  var rows = [];
+  r.holes.slice().sort(function(a, b){ return a.n - b.n; }).forEach(function(h){
+    var rp = r.plan && r.plan[h.n]; if (!rp) return;
+    var sc = holePlayed(h) ? holeScore(h) : null;
+    var shots = rp.shots.map(function(ps, k){
+      var s = h.shots[k]; if (!s) return {k:k, ps:ps, s:null};
+      var club = s.club || null, clubCh = !!(club && ps.club && club !== ps.club);
+      var moved = s.plan ? yd(distM(s.plan, ps)) : null, aimCh = moved != null && moved > AIM_MOVED_YD;
+      var e = s.excluded ? null : shotEnd(h, k), pr = e ? planResult(s, ps, e.pt, ps) : null;
+      return {k:k, ps:ps, s:s, club:club, clubCh:clubCh, aimCh:aimCh, moved:moved, pr:pr};
+    });
+    var hit = shots.filter(function(x){ return x.s; });
+    rows.push({h:h, rp:rp, sc:sc, shots:shots, extra:Math.max(0, h.shots.length - rp.shots.length),
+      followed:hit.length > 0 && hit.every(function(x){ return !x.clubCh && !x.aimCh; })});
+  });
+  var t = {planned:rows.length, played:0, followed:0, vs:0, scored:0, fol:{n:0, d:0}, dev:{n:0, d:0}, shots:0, inside:0, clubCh:0, aimCh:0};
+  rows.forEach(function(x){
+    if (x.sc != null && x.rp.score != null){
+      var d = x.sc - x.rp.score; t.scored++; t.vs += d;
+      var b = x.followed ? t.fol : t.dev; b.n++; b.d += d;
+    }
+    if (x.sc != null) t.played++;
+    if (x.followed) t.followed++;
+    x.shots.forEach(function(s){ if (s.pr){ t.shots++; if (s.pr.inside) t.inside++; } if (s.clubCh) t.clubCh++; if (s.aimCh) t.aimCh++; });
+  });
+  return {rows:rows, t:t};
+}
+window.__planReport = function(){ return planReport(active()); };
+function signed(v){ return (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(Math.round(v * 10) / 10); }
+function openPlanReview(r){
+  var rep = planReport(r), t = rep.t;
+  if (!rep.rows.length){ toast('No hole of this round was played with a plan. Menu, Course, Plan the round.', 4000); return; }
+  var avg = function(b){ return signed(b.d / b.n) + ' a hole (' + plural(b.n, 'hole') + ')'; };
+  var head = '<div class="tblwrap"><table class="stats"><tbody>' +
+    '<tr><td>Holes played with a plan</td><td>' + t.planned + '</td></tr>' +
+    '<tr><td>Played as planned</td><td>' + t.followed + ' of ' + t.planned + '</td></tr>' +
+    (t.scored ? '<tr><td>Against your target score</td><td>' + signed(t.vs) + '</td></tr>' : '') +
+    '<tr><td>Planned shots inside the pattern</td><td>' + (t.shots ? t.inside + ' of ' + t.shots : '—') + '</td></tr>' +
+    '<tr><td>Club changed from the plan</td><td>' + plural(t.clubCh, 'time') + '</td></tr>' +
+    '<tr><td>Target moved on the day</td><td>' + plural(t.aimCh, 'time') + '</td></tr>' +
+    '</tbody></table></div>' +
+    (t.scored ? '<div class="note">Against your target score: ' + [t.fol.n ? '<b>stuck to the plan</b> ' + avg(t.fol) : '', t.dev.n ? '<b>changed it</b> ' + avg(t.dev) : ''].filter(Boolean).join('; ') + '. ' +
+      (t.fol.n + t.dev.n < 8 ? 'That is a handful of holes, so read it as a hint, not a verdict: it firms up over rounds.' : '') + '</div>' : '');
+  var rows = rep.rows.map(function(x){
+    var par = parForRound(r, x.h.n);
+    var top = 'Hole ' + x.h.n + (par ? ' · Par ' + par : '') + (x.rp.score != null ? ' · target ' + x.rp.score : '') +
+      (x.sc != null ? ' · scored ' + x.sc + (x.rp.score != null ? ' (' + signed(x.sc - x.rp.score) + ')' : '') : ' · not finished');
+    var lines = x.shots.map(function(s){
+      if (!s.s) return (s.k + 1) + '. ' + esc(s.ps.club) + ': not needed';
+      var what = (s.clubCh ? esc(s.ps.club) + ' → ' + esc(s.club) : esc(s.club || s.ps.club)) + (s.aimCh ? ', target moved ' + r0(s.moved) + ' yd' : '');
+      var res = s.pr ? missText(s.pr) + ' of the plan, ' + (s.pr.inside ? 'inside' : 'outside') + ' the pattern' : 'no finish measured';
+      return (s.k + 1) + '. ' + what + ': ' + res;
+    });
+    if (x.extra) lines.push(plural(x.extra, 'more shot') + ' than planned');
+    return '<button class="ritem pr" data-n="' + x.h.n + '"><div class="rt">' + top + ' <span class="tag' + (x.followed ? '' : ' off') + '">' + (x.followed ? 'AS PLANNED' : 'CHANGED') + '</span></div>' +
+      '<div class="rs">' + lines.join('<br>') + '</div></button>';
+  }).join('');
+  var el = openSheet('<h3>Plan against the round</h3><div class="sub">' + esc(r.course || 'This round') + ' · ' + niceDate(r.started) +
+    '. Each planned shot is measured from where your ball really was to the target you planned.</div>' + head +
+    '<div class="rlist" style="margin-top:12px">' + rows + '</div><div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+  Array.prototype.forEach.call(el.querySelectorAll('.ritem.pr'), function(b){ b.onclick = function(){ closeSheet(true); if (active() === r) goToHole(+b.dataset.n); }; });
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+function parForRound(r, n){ var c = r.courseId ? findCourse(r.courseId) : null; return (c && c.pars && c.pars[n]) || null; }
 
 /* ---------- jumping between holes (skipping any you do not want to track) ---------- */
 function goToHole(n){
@@ -3914,15 +4326,17 @@ function openMenu(){
       mtile('mSummary', 'trophy', 'Round card'),
       mtile('mShots', 'list', 'Every shot'),
       mtile('mReview', 'wrench', 'Review'),
+      r.plan && Object.keys(r.plan).length ? mtile('mPlanRev', 'route', 'Plan vs round') : '',
       mtile('mEnd', r.ended ? 'play' : 'stop', r.ended ? 'Reopen round' : 'End round', 'warn')
     ].join('') + '</div>' : '') +
     msec('dCourse', 'Course', r ? [
+      mrow('mPlanR', 'route', 'Plan the round'),
       mrow('mImport', 'globe', 'Import from OpenStreetMap'),
       curHole() ? mrow('mGreen', 'flag', 'Green for hole ' + curHole().n) : '',
       mrow('mGreens', 'target', 'Set up all the greens'),
       mrow('mCourse', 'pencil', 'Rename course'),
       mrow('mOffline', 'map', 'Offline maps')
-    ] : [mrow('mImport', 'globe', 'Import from OpenStreetMap'), mrow('mOffline', 'map', 'Offline maps')]) +
+    ] : [mrow('mPlanR', 'route', 'Plan the round'), mrow('mImport', 'globe', 'Import from OpenStreetMap'), mrow('mOffline', 'map', 'Offline maps')]) +
     msec('dHistory', 'History', [
       mrow('mRounds', 'clock', 'Rounds'),
       mrow('mStats', 'chart', 'Club distances')
@@ -3949,7 +4363,9 @@ function openMenu(){
     if (c && r.course) c.name = r.course;
     save(); closeSheet(true);
   });
-  on('mImport', function(){ closeSheet(true); openOsmImport(); });
+  on('mImport', function(){ closeSheet(true); if (pm) exitPlanMode(); openOsmImport(); });
+  on('mPlanR', function(){ closeSheet(true); if (pm) exitPlanMode(); openPlanRound(); });
+  on('mPlanRev', function(){ closeSheet(true); openPlanReview(r); });
   on('mGreen', function(){ var h = curHole(); closeSheet(true); if (h) openCourseGreen(h); });
   on('mGreens', function(){
     closeSheet(true);
@@ -3996,7 +4412,7 @@ function openMenu(){
         return Promise.all(Object.keys(tmap).map(function(id){ return store.put('trail:' + id, tmap[id]); }));
       }).then(function(){
         trails = {}; trailState = {}; if (plan) endPlan(true);
-        S = j; save(); setBase(); closeSheet(true); renderHole(true); toast('Backup restored');
+        S = j; pmRebind(); save(); setBase(); closeSheet(true); renderHole(true); toast('Backup restored');
       });
     }).catch(function(){ toast('That file is not a Shot Tracker backup.'); });
   };
@@ -4192,6 +4608,7 @@ function openGuide(){
       '<li><b>Your patterns.</b> In Settings under <i>Dispersion patterns</i>, tap each club. Choose Arc (tee shots) or Circle/oval (approaches), set the total width and depth, then slide the split to match your miss. The presets cover fades and draws.</li>' +
       '<li><b>Sharp satellite (optional).</b> Paste a free ArcGIS key in Settings and pick <i>Sharp satellite (Esri)</i>.</li>' +
       '<li><b>Import your course.</b> Scroll the map to it, then ' + k('☰') + ' <i>Course</i>, <i>Import from OpenStreetMap</i>. Where volunteers have mapped it, that fills in every green, with its real shape for front and back yardages, and the tee boxes. The import says exactly what it found; place anything missing by hand.</li>' +
+      '<li><b>Plan the round (optional).</b> ' + k('☰') + ' <i>Course</i>, <i>Plan the round</i>. Pick your tee box on each hole, tap the map for each target and choose the club: its pattern is drawn from where the last shot leaves you, down to the green. Set the score you are playing for. On the course ' + k('AIM', 'plan') + ' loads the planned shot from wherever your ball really is, and <i>Plan vs round</i> afterwards shows where the plan held and where it did not.</li>' +
       '<li><b>Save your course.</b> At home on Wi-Fi: zoom so the course fills the screen, then ' + k('☰') + ' <i>Offline maps</i> and <i>Save area on screen</i>. That imagery shows even with no signal.</li>' +
     '</ol>' +
 
@@ -4273,8 +4690,9 @@ $('#holedBtn').onclick = onGreen;
   });
 })();
 $('#menuBtn').onclick = openMenu;
-$('#prevHole').onclick = function(){ var r = active(); if (r && r.cur > 0){ r.cur--; save(); renderHole(true); } };
+$('#prevHole').onclick = function(){ if (pm){ pmStep(-1); return; } var r = active(); if (r && r.cur > 0){ r.cur--; save(); renderHole(true); } };
 $('#nextHole').onclick = function(){
+  if (pm){ pmStep(1); return; }
   var r = active(); if (!r){ toast('Nothing to play yet: PLAN or RECORD starts a round.'); return; }
   if (nagUnfinished()) return;
   var h = curHole();
@@ -4282,7 +4700,18 @@ $('#nextHole').onclick = function(){
   else { r.holes.push({n:nextN(h.n), shots:[], green:null}); r.cur = r.holes.length - 1; } // skipping holes is fine
   save(); renderHole(true);
 };
-$('#holeLabel').onclick = openHolePicker;
+$('#holeLabel').onclick = function(){ if (pm) openPlanPicker(); else openHolePicker(); };
+$('#pmDone').onclick = exitPlanMode;
+$('#pmAdd').onclick = function(){ if (pm) pmAdd(); };
+$('#pmDel').onclick = function(){ if (pm) pmDel(); };
+$('#pmScMinus').onclick = function(){ if (pm) pmScore(-1); };
+$('#pmScPlus').onclick = function(){ if (pm) pmScore(1); };
+$('#pmClubBtn').onclick = function(){ if (pm){ $('#pmClubs').hidden = !$('#pmClubs').hidden; layout(); } };
+$('#pmPat').onclick = function(){
+  if (!pm) return; var ph = planHoleOf(pm.c, pm.n, false); if (!ph || !ph.shots.length){ toast('Place a target first.'); return; }
+  var s = ph.shots[pm.sel >= 0 ? pm.sel : ph.shots.length - 1];
+  openPatternEdit(s.club);
+};
 $('#rotBtn').onclick = cycleRotation;
 $('#tgtBtn').onclick = function(){ startPlaceGreen(false); };
 $('#tgtSave').onclick = function(){ saveGreen(false); };
