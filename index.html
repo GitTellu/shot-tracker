@@ -548,7 +548,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.25.0', SCHEMA = 7;
+var APP_VERSION = '1.25.1', SCHEMA = 7;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -1903,11 +1903,17 @@ function openOsmImport(){
   var el = openSheet('<h3>Import a course</h3><div class="sub" id="oiSub">Looking for golf courses within three miles of the middle of the map&hellip;</div>' +
     '<div id="oiList"></div>' + osmNote() + '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
   el.querySelector('#close').onclick = function(){ closeSheet(); };
-  overpassQuery('[out:json][timeout:25];(way["leisure"="golf_course"]' + around + ';relation["leisure"="golf_course"]' + around + ';);out tags center bb;').then(function(j){
+  overpassQuery('[out:json][timeout:25];(way["leisure"="golf_course"]' + around + ';relation["leisure"="golf_course"]' + around + ';);out tags bb;').then(function(j){
     var list = el.querySelector('#oiList'); if (!list || $('#sheetWrap').hidden) return;   // closed while it was looking
-    var found = (j.elements || []).filter(function(e){ return e.center && e.bounds; }).map(function(e){
-      return {type:e.type, id:e.id, name:(e.tags && e.tags.name) || 'Unnamed golf course', bounds:e.bounds, d:distM(at, {lat:e.center.lat, lng:e.center.lon})};
-    }).sort(function(a, b){ return a.d - b.d; });
+    // an Overpass out statement gives one of centre or bounds, not both, so work either into the other
+    var found = (j.elements || []).map(function(e){
+      var b = e.bounds, c = e.center;
+      if (!b && c) b = {minlat:c.lat - 0.01, minlon:c.lon - 0.013, maxlat:c.lat + 0.01, maxlon:c.lon + 0.013};
+      if (!b) return null;
+      if (!c) c = {lat:(b.minlat + b.maxlat) / 2, lon:(b.minlon + b.maxlon) / 2};
+      return {type:e.type, id:e.id, name:(e.tags && e.tags.name) || 'Unnamed golf course', bounds:b, d:distM(at, {lat:c.lat, lng:c.lon})};
+    }).filter(Boolean).sort(function(a, b){ return a.d - b.d; });
+    if (!found.length && j.remark){ el.querySelector('#oiSub').textContent = 'OpenStreetMap could not answer just now (' + j.remark.slice(0, 120) + '). Try again in a moment.'; return; }
     el.querySelector('#oiSub').textContent = found.length
       ? 'Pick the course. Nearest to the middle of the map first.'
       : 'No golf courses are mapped within three miles of the middle of the map. Scroll the map to the course and try again, or place the greens by hand.';
