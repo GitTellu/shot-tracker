@@ -502,7 +502,26 @@ var USGS_TILE = 'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImager
 var MAPBOX_TILE = 'https://api.mapbox.com/v4/mapbox.satellite/';
 var MAPBOX_CSS = 'https://api.mapbox.com/mapbox-gl-js/v3.9.4/mapbox-gl.css'; // official stylesheet, used only for the required Mapbox logo
 var MAPBOX_TTL_MS = 30 * 24 * 3600 * 1000; // Mapbox terms: on-device cache limited to 30 days
-var OFFLINE_MAX_TILES = 3000;
+var OFFLINE_MAX_TILES = 12000;   // a course at 6 in imagery needs z14-20, which is roughly 3,500 tiles
+var OFFLINE_MAX_MB = 220;        // the real guard: tiles vary from 8 KB of fairway to 60 KB of trees
+var LOCAL_CACHE = 'st-tiles-local-v1';
+var LOCAL_ZMIN = 14;
+
+/* Places to go looking for public agency imagery. Counties and regional councils fly 3 in
+   and 6 in orthophotos, against 0.6 m for the USGS layer and 0.3-0.5 m for the commercial
+   ones, so where one of these answers it is much the sharpest picture of the course.
+
+   Only the first address below has been seen published; the other two follow the usual
+   pattern for an ArcGIS site and may simply not exist. That is deliberate and harmless:
+   nothing here is trusted, a server becomes a map layer only once the app has fetched a
+   tile from it at the course and seen real imagery come back, and anything that does not
+   answer is dropped without comment. Paste an address in the sheet to add your own. */
+var IMAGERY_SERVERS = [
+  {label:'Adams County, CO', root:'https://gisapp.adcogov.org/arcgis/rest/services'},
+  {label:'Broomfield, CO', root:'https://gis.broomfield.org/arcgis/rest/services', guess:true},
+  {label:'Colorado state portal', root:'https://geodata.colorado.gov/server/rest/services', guess:true}
+];
+
 /* Imagery sources that may be saved on the phone.
    key() is the cache key (no access token in it); url() is what is fetched. */
 var SOURCES = {
@@ -513,6 +532,27 @@ var SOURCES = {
     key:function(z,x,y){ return MAPBOX_TILE + z + '/' + x + '/' + y + '@2x.jpg80'; },
     url:function(z,x,y){ return MAPBOX_TILE + z + '/' + x + '/' + y + '@2x.jpg80?access_token=' + encodeURIComponent(S.settings.mapboxToken); }}
 };
+
+/* A local imagery source, once it has proved itself, behaves exactly like the built-in
+   ones: same cache, same download, same delete. ttl is null because agency services do not
+   impose the 30-day limit Mapbox does, so a course saved this way stays saved. */
+function fillTpl(tpl, z, x, y){ return tpl.replace('{z}', z).replace('{x}', x).replace('{y}', y); }
+function localSrc(rec){
+  return {label:rec.label, cache:LOCAL_CACHE, zmin:LOCAL_ZMIN, zmax:rec.zmax, ttl:null, local:rec,
+    key:function(z,x,y){ return fillTpl(rec.tpl, z, x, y); },
+    url:function(z,x,y){ return fillTpl(rec.tpl, z, x, y); }};
+}
+function localList(){ return (S && S.settings && S.settings.localSources) || []; }
+function findLocal(id){ return localList().filter(function(r){ return r.id === id; })[0] || null; }
+/* Every place that used SOURCES[name] goes through here, so 'local:abc123' works wherever
+   'usgs' does. An unknown name falls back to USGS rather than throwing mid-round. */
+function srcFor(name){
+  if (name && name.indexOf('local:') === 0){
+    var rec = findLocal(name.slice(6));
+    return rec ? localSrc(rec) : SOURCES.usgs;
+  }
+  return SOURCES[name] || SOURCES.usgs;
+}
 var TRAIL_MIN_STEP_M = 3;
 var WEAK_ACC_M = 20;          // above this median accuracy the app asks before recording
 var STALE_FIX_MS = 5000;      // pill turns grey when the newest fix is older than this
@@ -549,11 +589,11 @@ function toast(msg, ms){
 
 /* ---------- state ---------- */
 var APP_VERSION = '1.26.0', SCHEMA = 8;
-function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
+function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', localSources:[], wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
   if (!j || j.v !== 1) return d;
-  j.settings = Object.assign(d.settings, j.settings || {}); j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || [];
+  j.settings = Object.assign(d.settings, j.settings || {}); j.settings.localSources = j.settings.localSources || []; j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || [];
   j.courses = j.courses || []; // v1.5: greens you place yourself, kept per course and reused every round
   // v1.23 (schema 6): a course may also carry osm (where it came from), geo (holes, green outlines,
   // tee boxes and hazards from OpenStreetMap) and fb (front and back edges placed by hand). All optional.
@@ -705,6 +745,13 @@ function osmLayer(){
   return L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {maxNativeZoom:19, maxZoom:21,
     attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'});
 }
+/* Agency imagery sits on top of USGS, so a hole that falls outside the county's flight
+   line still shows something rather than grey. maxNativeZoom is the zoom the probe proved,
+   so Leaflet stretches the sharpest real tiles instead of asking for ones that are blank. */
+function localLayer(rec){
+  return L.tileLayer(rec.tpl, {maxNativeZoom:rec.zmax, maxZoom:21,
+    attribution:rec.attribution || esc(rec.label)});
+}
 function ensureMapboxCss(){
   if (document.getElementById('mbcss')) return;
   var l = document.createElement('link'); l.id = 'mbcss'; l.rel = 'stylesheet'; l.href = MAPBOX_CSS; document.head.appendChild(l);
@@ -716,11 +763,14 @@ function setBase(){
   var st = S.settings;
   // Fallback stack, bottom to top: USGS (can be saved offline) < OpenStreetMap (online only) < sharp imagery.
   // Any tile a higher layer can't load (no signal, not saved, token problem) shows the next layer down.
-  var top = (st.basemap === 'mapbox' && st.mapboxToken) ? 'mapbox' : (st.basemap === 'sat' && st.arcgisKey) ? 'sat' : st.basemap === 'usgs' ? 'usgs' : 'osm';
+  var localRec = st.basemap && st.basemap.indexOf('local:') === 0 ? findLocal(st.basemap.slice(6)) : null;
+  var top = localRec ? 'local' : (st.basemap === 'mapbox' && st.mapboxToken) ? 'mapbox' : (st.basemap === 'sat' && st.arcgisKey) ? 'sat' : st.basemap === 'usgs' ? 'usgs' : 'osm';
   if (top !== 'usgs'){ underLayers.push(usgsLayer()); }
   if (top === 'mapbox' || top === 'sat'){ underLayers.push(osmLayer()); }
   underLayers.forEach(function(l){ l.addTo(map); });
-  if (st.basemap === 'mapbox' && st.mapboxToken){
+  if (localRec){
+    baseLayer = localLayer(localRec);
+  } else if (st.basemap === 'mapbox' && st.mapboxToken){
     ensureMapboxCss();
     baseLayer = L.tileLayer(MAPBOX_TILE + '{z}/{x}/{y}@2x.jpg80?access_token=' + encodeURIComponent(st.mapboxToken), {maxNativeZoom:SOURCES.mapbox.zmax, maxZoom:21,
       attribution:'&copy; <a href="https://www.mapbox.com/about/maps/">Mapbox</a> &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://www.maxar.com/">Maxar</a> <a href="https://apps.mapbox.com/feedback/"><strong>Improve this map</strong></a>'});
@@ -4587,11 +4637,16 @@ function openSettings(){
     '<label class="fl">Clubs (one per line, in bag order)<textarea id="clubs" rows="9">' + esc(st.clubs.join('\n')) + '</textarea></label>' +
     '<label class="fl">If you tap before your position locks, average for<select id="avg">' + [0,2,3,4,5,8].map(function(v){ return '<option value="' + v + '"' + (v === st.avgSeconds ? ' selected' : '') + '>' + (v ? v + ' seconds' : 'Off (use latest fix)') + '</option>'; }).join('') + '</select></label>' +
     '<label class="fl">Map<select id="base">' +
+      localList().map(function(x){
+        return '<option value="local:' + x.id + '"' + (st.basemap === 'local:' + x.id ? ' selected' : '') + '>' +
+          esc(x.label) + ' (' + resLabel(x.zmax, map.getCenter().lat) + ', save offline, no expiry)</option>';
+      }).join('') +
       '<option value="mapbox"' + (st.basemap === 'mapbox' ? ' selected' : '') + '>Sharp satellite (Mapbox, needs token, save offline 30 days)</option>' +
       '<option value="sat"' + (st.basemap === 'sat' ? ' selected' : '') + '>Sharp satellite (Esri, free key, online only)</option>' +
       '<option value="osm"' + (st.basemap === 'osm' ? ' selected' : '') + '>OpenStreetMap (online only)</option>' +
       '<option value="usgs"' + (st.basemap === 'usgs' ? ' selected' : '') + '>Basic satellite (USGS, save offline, no expiry)</option>' +
       '</select></label>' +
+    '<div class="note">Sharper imagery in the menu looks for county and regional aerial photography covering the course you are on. Where it finds some it is usually several times sharper than any of these, and it saves offline with no expiry.</div>' +
     '<label class="fl">Mapbox access token<input id="mbtok" type="password" autocomplete="off" value="' + esc(st.mapboxToken) + '" placeholder="pk.…"></label>' +
     '<div class="note">Stored only on this phone, never in the website code. In your Mapbox account, restrict the token to https://gittellu.github.io</div>' +
     '<label class="fl">ArcGIS API key (for Esri satellite)<input id="key" type="password" autocomplete="off" value="' + esc(st.arcgisKey) + '" placeholder="Paste key"></label>' +
@@ -4636,6 +4691,7 @@ var ICONS = {
   target:'<circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.8v3M12 19.2v3M1.8 12h3M19.2 12h3"/>',
   pencil:'<path d="M4 20h4.2L20.2 8 16 3.8 4 15.8V20z"/><path d="M14.5 5.5l4 4"/>',
   map:'<path d="M9 4.5L3 6.8v13.4l6-2.3 6 2.3 6-2.3V4.5l-6 2.3-6-2.3z"/><path d="M9 4.5v13.4M15 6.8v13.4"/>',
+  layers:'<path d="M12 3 3 7.5l9 4.5 9-4.5L12 3z"/><path d="M3 12.5 12 17l9-4.5M3 17 12 21.5 21 17"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 6.8V12l3.2 2"/>',
   chart:'<path d="M4.5 20V10.5M10.5 20V4.5M16.5 20v-6.5M2.5 20h19"/>',
   down:'<path d="M12 3.5v11.5M8 11l4 4 4-4M4 20.5h16"/>',
@@ -4728,8 +4784,10 @@ function openMenu(){
       curHole() ? mrow('mGreen', 'flag', 'Green for hole ' + curHole().n) : '',
       mrow('mGreens', 'target', 'Set up all the greens'),
       mrow('mCourse', 'pencil', 'Rename course'),
+      mrow('mImagery', 'layers', 'Sharper imagery'),
       mrow('mOffline', 'map', 'Offline maps')
-    ] : [mrow('mPlanR', 'route', 'Plans for a course'), mrow('mImport', 'globe', 'Import from OpenStreetMap'), mrow('mOffline', 'map', 'Offline maps')]) +
+    ] : [mrow('mPlanR', 'route', 'Plans for a course'), mrow('mImport', 'globe', 'Import from OpenStreetMap'),
+         mrow('mImagery', 'layers', 'Sharper imagery'), mrow('mOffline', 'map', 'Offline maps')]) +
     msec('dHistory', 'History', [
       mrow('mRounds', 'clock', 'Rounds'),
       mrow('mStats', 'chart', 'Club distances')
@@ -4771,6 +4829,7 @@ function openMenu(){
   on('mStats', function(){ closeSheet(true); openStats(); });
   on('mShots', function(){ closeSheet(true); openShotLog(active()); });
   on('mReview', function(){ closeSheet(true); openReview(); });
+  on('mImagery', function(){ closeSheet(true); openImagery(); });
   on('mOffline', function(){ closeSheet(true); openOffline(); });
   on('mSettings', function(){ closeSheet(true); openSettings(); });
   on('mEnd', function(){ closeSheet(true); if (r.ended) resumeRound(r); else endRound(r); });
@@ -4827,7 +4886,114 @@ function tilesFor(b, zmin, zmax){
 }
 window.__tilesFor = tilesFor;
 function mb(bytes){ return (bytes / 1048576).toFixed(1) + ' MB'; }
-function areaSrc(a){ return SOURCES[a.src || 'usgs']; }
+function areaSrc(a){ return srcFor(a.src || 'usgs'); }
+
+/* ---------- finding sharper imagery ---------- */
+/* Ground resolution of one pixel at this latitude, which is what "sharper" actually means.
+   256 px tiles, so zoom 20 is about 11 cm a pixel in Colorado and zoom 16 about 1.8 m. */
+function mPerPx(z, lat){ return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, z); }
+function resLabel(z, lat){
+  var m = mPerPx(z, lat);
+  return m < 1 ? Math.round(m * 100) + ' cm a pixel' : m.toFixed(1) + ' m a pixel';
+}
+
+/* A tile server outside its coverage usually answers 200 with a blank image rather than an
+   error, so a status code proves nothing. This draws the tile and looks at it: if every
+   sampled pixel is the same colour, or the whole thing is transparent, there is no imagery
+   there. Fetched as a blob first, so the canvas stays untainted and readable. */
+function tileLooksReal(blob){
+  if (!blob || blob.size < 700) return Promise.resolve(false);   // blank JPEG/PNG tiles are tiny
+  return new Promise(function(res){
+    var url = URL.createObjectURL(blob), img = new Image();
+    img.onload = function(){
+      try {
+        var n = 24, c = document.createElement('canvas');
+        c.width = n; c.height = n;
+        var x = c.getContext('2d');
+        x.drawImage(img, 0, 0, n, n);
+        var d = x.getImageData(0, 0, n, n).data, opaque = 0, first = -1, varied = false;
+        for (var i = 0; i < d.length; i += 4){
+          if (d[i+3] < 8) continue;
+          opaque++;
+          var v = (d[i] << 16) | (d[i+1] << 8) | d[i+2];
+          if (first < 0) first = v; else if (v !== first) varied = true;
+        }
+        res(opaque > n * n * 0.5 && varied);
+      } catch(e){ res(false); }
+      URL.revokeObjectURL(url);
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); res(false); };
+    img.src = url;
+  });
+}
+
+/* One tile, fetched the same way the offline download will fetch it. mode:'cors' matters:
+   if the server sends no CORS header the fetch rejects here, which is exactly what we want
+   to know, because cache.put() refuses an opaque response and the course could never be
+   saved for offline play. */
+function probeTile(tpl, z, lat, lng){
+  var url = fillTpl(tpl, z, lng2x(lng, z), lat2y(lat, z));
+  return fetch(url, {mode:'cors', cache:'no-store'}).then(function(r){
+    if (!r.ok) return {ok:false, why:'http ' + r.status};
+    return r.blob().then(function(b){
+      return tileLooksReal(b).then(function(real){
+        return real ? {ok:true, bytes:b.size} : {ok:false, why:'no imagery here'};
+      });
+    });
+  }).catch(function(){ return {ok:false, why:'blocked or offline'}; });
+}
+
+/* Walks down from the deepest zoom the service claims until a tile at the course really
+   has imagery in it. That top number is the whole point: it is the difference between a
+   sharp course and a blurry one, and services routinely advertise more than they hold. */
+function probeSource(tpl, topZ, lat, lng){
+  var z = Math.min(topZ, 21);
+  function step(){
+    if (z < LOCAL_ZMIN) return Promise.resolve({ok:false, why:'no imagery at this course'});
+    return probeTile(tpl, z, lat, lng).then(function(r){
+      if (r.ok) return {ok:true, zmax:z, bytes:r.bytes};
+      if (r.why === 'blocked or offline' && z === Math.min(topZ, 21)) return {ok:false, why:r.why};
+      z--; return step();
+    });
+  }
+  return step();
+}
+
+/* ArcGIS servers describe themselves, so pointing the app at a county's REST root is
+   enough: it lists the services, keeps the ones that are cached image tiles in the same
+   grid the map uses, and reads the deepest zoom each one holds. */
+function agsJson(url){
+  return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 'f=json', {mode:'cors', cache:'no-store'})
+    .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+}
+function agsCatalog(root){
+  return agsJson(root).then(function(d){
+    if (!d) return [];
+    var here = (d.services || []).map(function(sv){ return root + '/' + sv.name.split('/').pop() + '/' + sv.type; });
+    // one level of folders is enough: imagery is rarely buried deeper than Basemaps/Imagery
+    return Promise.all((d.folders || []).slice(0, 12).map(function(f){
+      return agsJson(root + '/' + f).then(function(fd){
+        return ((fd && fd.services) || []).map(function(sv){ return root + '/' + sv.name + '/' + sv.type; });
+      });
+    })).then(function(sets){
+      return here.concat.apply(here, sets);
+    });
+  });
+}
+/* Cached, Web Mercator, and tiled: anything else cannot be dropped straight into Leaflet. */
+function agsTiled(url){
+  return agsJson(url).then(function(d){
+    if (!d || !d.tileInfo || !d.tileInfo.lods || !d.tileInfo.lods.length) return null;
+    var wk = (d.tileInfo.spatialReference || {});
+    if ((wk.latestWkid || wk.wkid) !== 3857 && (wk.latestWkid || wk.wkid) !== 102100) return null;
+    var top = d.tileInfo.lods[d.tileInfo.lods.length - 1].level;
+    return {tpl:url + '/tile/{z}/{y}/{x}', topZ:top, name:(d.documentInfo && d.documentInfo.Title) || url.split('/').slice(-2)[0]};
+  });
+}
+/* Imagery services are not labelled as such, so the name is a hint and the tile is proof. */
+function looksImagery(url){ return /ortho|imagery|aerial|photo|drapp|naip|basemap/i.test(url); }
+window.__imagery = {probeTile:probeTile, probeSource:probeSource, agsCatalog:agsCatalog, agsTiled:agsTiled, mPerPx:mPerPx, srcFor:srcFor, servers:IMAGERY_SERVERS}; // exposed for testing
+
 function daysLeft(a){ var s = areaSrc(a); return s.ttl ? Math.max(0, Math.ceil((a.t + s.ttl - Date.now()) / 86400000)) : null; }
 var offlineOK = ('caches' in window) && ('serviceWorker' in navigator) && window.isSecureContext;
 var dl = null; // active download {cancel}
@@ -4838,7 +5004,7 @@ function registerSW(){
 }
 
 function downloadArea(srcName, b, onProgress){
-  var src = SOURCES[srcName], tiles = tilesFor(b, src.zmin, src.zmax), i = 0, done = 0, ok = 0, bytes = 0, netErr = 0, httpErr = 0;
+  var src = srcFor(srcName), tiles = tilesFor(b, src.zmin, src.zmax), i = 0, done = 0, ok = 0, bytes = 0, netErr = 0, httpErr = 0;
   var stamp = String(Date.now());
   dl = {cancel:false};
   var mine = dl;
@@ -4872,7 +5038,7 @@ function now(){ return Date.now(); }
 function deleteAreaTiles(area){
   var src = areaSrc(area), keep = {};
   S.offlineAreas.forEach(function(a){
-    if (a.id !== area.id && areaSrc(a) === src) tilesFor(a.b, a.zmin, a.zmax).forEach(function(t){ keep[src.key(t[0], t[1], t[2])] = 1; });
+    if (a.id !== area.id && areaSrc(a).cache === src.cache) tilesFor(a.b, a.zmin, a.zmax).forEach(function(t){ keep[areaSrc(a).key(t[0], t[1], t[2])] = 1; });
   });
   return caches.open(src.cache).then(function(c){
     return Promise.all(tilesFor(area.b, area.zmin, area.zmax).map(function(t){ return src.key(t[0], t[1], t[2]); })
@@ -4895,22 +5061,155 @@ function purgeExpired(){
 }
 window.__purgeExpired = purgeExpired;
 
+/* Works through one agency's REST root and reports back anything that actually has this
+   course in it. Names are only a hint, so the filter is generous and the tile decides. */
+function discoverServer(srv, lat, lng, onFound, onStatus){
+  onStatus('Asking ' + srv.label + '\u2026');
+  return agsCatalog(srv.root).then(function(urls){
+    if (!urls.length){ onStatus(srv.label + ': ' + (srv.guess ? 'no server at the address the app tries.' : 'nothing published there, or it refuses browser requests.')); return; }
+    var named = urls.filter(looksImagery);
+    var look = (named.length ? named : urls).slice(0, 8);
+    onStatus(srv.label + ': checking ' + look.length + ' of ' + urls.length + ' services\u2026');
+    return look.reduce(function(p, u){
+      return p.then(function(){
+        return agsTiled(u).then(function(t){
+          if (!t) return;
+          return probeSource(t.tpl, t.topZ, lat, lng).then(function(r){
+            if (r.ok) onFound({label:srv.label + ' \u2014 ' + t.name, tpl:t.tpl, zmax:r.zmax,
+              attribution:'Imagery: ' + esc(srv.label)});
+          });
+        });
+      });
+    }, Promise.resolve());
+  }).catch(function(){ onStatus(srv.label + ': ' + (srv.guess ? 'no server at the address the app tries.' : 'could not be reached from the browser.')); });
+}
+
+/* Sharper imagery: find it, prove it covers the course, then let it be saved like any other
+   layer. Everything here is measured at the point on screen, because coverage boundaries
+   follow flight lines, not county lines. */
+function openImagery(){
+  var c = map.getCenter(), lat = c.lat, lng = c.lng, r = active();
+  var busy = false;
+  var el = openSheet(
+    '<h3>Sharper imagery</h3>' +
+    '<div class="sub">Counties and regional councils fly their own aerial photography, often 3 to 6 inches a pixel against about 2 feet for the built-in satellite layer. Agency services do not usually put Mapbox\u2019s 30-day clock on saved tiles, so a course saved this way tends to stay saved \u2014 worth a look at the service\u2019s own terms if you care. Centre the map on the course first: everything below is tested at the middle of the screen.</div>' +
+    '<div id="found"></div>' +
+    '<div class="stack"><button class="btn pri" id="scan">Look for imagery at this course</button></div>' +
+    '<div id="status" class="note" hidden></div>' +
+    '<div id="results"></div>' +
+    '<label class="fl">Or paste a service address<input id="url" autocomplete="off" placeholder="https://\u2026/MapServer"></label>' +
+    '<div class="note">An ArcGIS MapServer or ImageServer address, or a tile pattern with {z}/{x}/{y} in it. County and city GIS or open-data pages publish these: for the two counties north of Denver, look at Adams County GIS and Broomfield\u2019s open data site. The map only keeps it if a tile really comes back for this course.</div>' +
+    '<div class="stack"><button class="btn" id="addUrl">Test this address</button></div>' +
+    '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+
+  var statusEl = el.querySelector('#status'), resEl = el.querySelector('#results');
+  function status(t){ statusEl.hidden = false; statusEl.textContent = t; }
+  function use(rec){
+    S.settings.localSources.unshift(rec);
+    S.settings.basemap = 'local:' + rec.id;
+    save(); setBase(); drawFound();
+    toast(rec.label + ' is now the map, down to ' + resLabel(rec.zmax, lat) + '.', 5000);
+  }
+  function drawFound(){
+    var box = el.querySelector('#found'), list = localList();
+    if (!list.length){ box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="mlab">Imagery you have added</div><div class="rlist">' + list.map(function(x, i){
+      var on = S.settings.basemap === 'local:' + x.id;
+      return '<div class="ritem"><div class="rt">' + esc(x.label) + (on ? ' <span class="tag">IN USE</span>' : '') + '</div>' +
+        '<div class="rs">to zoom ' + x.zmax + ' \u00b7 ' + resLabel(x.zmax, lat) + '</div>' +
+        '<div class="rb"><button data-a="use" data-i="' + i + '">Use</button><button data-a="del" data-i="' + i + '">Remove</button></div></div>';
+    }).join('') + '</div>';
+    Array.prototype.forEach.call(box.querySelectorAll('button'), function(b){
+      b.onclick = function(){
+        var x = localList()[+b.dataset.i];
+        if (b.dataset.a === 'use'){ S.settings.basemap = 'local:' + x.id; save(); setBase(); drawFound(); toast(x.label, 3000); return; }
+        if (!confirm('Remove ' + x.label + '? Any imagery saved from it is deleted too.')) return;
+        var areas = S.offlineAreas.filter(function(a){ return a.src === 'local:' + x.id; });
+        areas.reduce(function(p, a){ return p.then(function(){ return deleteAreaTiles(a); }); }, Promise.resolve()).then(function(){
+          S.offlineAreas = S.offlineAreas.filter(function(a){ return a.src !== 'local:' + x.id; });
+          S.settings.localSources = localList().filter(function(y){ return y.id !== x.id; });
+          if (S.settings.basemap === 'local:' + x.id) S.settings.basemap = 'usgs';
+          save(); setBase(); drawFound();
+        });
+      };
+    });
+  }
+  function addResult(f){
+    var id = uid();
+    var row = document.createElement('div');
+    row.className = 'ritem';
+    row.innerHTML = '<div class="rt">' + esc(f.label) + '</div><div class="rs">to zoom ' + f.zmax + ' \u00b7 ' +
+      resLabel(f.zmax, lat) + ' \u00b7 can be saved offline</div><div class="rb"><button>Use this</button></div>';
+    row.querySelector('button').onclick = function(){
+      if (findLocal(id)) return;
+      use({id:id, label:f.label, tpl:f.tpl, zmax:f.zmax, attribution:f.attribution, t:Date.now()});
+    };
+    if (!resEl.firstChild) resEl.innerHTML = '<div class="mlab">Found at this course</div><div class="rlist" id="rl"></div>';
+    (el.querySelector('#rl') || resEl).appendChild(row);
+  }
+
+  el.querySelector('#scan').onclick = function(){
+    if (busy) return;
+    busy = true; resEl.innerHTML = '';
+    var n = 0;
+    IMAGERY_SERVERS.reduce(function(p, srv){
+      return p.then(function(){ return discoverServer(srv, lat, lng, function(f){ n++; addResult(f); }, status); });
+    }, Promise.resolve()).then(function(){
+      busy = false;
+      status(n ? n + ' source' + (n === 1 ? ' covers' : 's cover') + ' this course.'
+               : 'Nothing found. The servers in the list may be unreachable from a browser, or may not publish imagery for here. Paste your county GIS tile address below instead.');
+    });
+  };
+  el.querySelector('#addUrl').onclick = function(){
+    if (busy) return;
+    var u = el.querySelector('#url').value.trim().replace(/\/$/, '');
+    if (!u) return;
+    busy = true;
+    if (u.indexOf('{z}') >= 0){
+      status('Testing that address at this course\u2026');
+      probeSource(u, 21, lat, lng).then(function(pr){
+        busy = false;
+        if (!pr.ok){ status('No imagery came back for this course (' + pr.why + ').'); return; }
+        status('');
+        addResult({label:'Pasted address', tpl:u, zmax:pr.zmax, attribution:'Imagery: pasted source'});
+      });
+      return;
+    }
+    status('Reading that service\u2026');
+    agsTiled(u).then(function(t){
+      if (!t){ busy = false; status('That address is not a cached tile service in the map\u2019s grid. It may still work pasted as a {z}/{x}/{y} pattern.'); return; }
+      return probeSource(t.tpl, t.topZ, lat, lng).then(function(pr){
+        busy = false;
+        if (!pr.ok){ status('The service answered, but has no imagery at this course (' + pr.why + ').'); return; }
+        status('');
+        addResult({label:t.name, tpl:t.tpl, zmax:pr.zmax, attribution:'Imagery: ' + esc(t.name)});
+      });
+    }).catch(function(){ busy = false; status('That address could not be reached from the browser.'); });
+  };
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+  drawFound();
+}
+
 function openOffline(){
   if (!offlineOK){
     openSheet('<h3>Offline maps</h3><div class="note">Offline maps need this page opened over https:// in a browser that supports service workers.</div><div class="stack"><button class="btn ghost" id="close">Close</button></div>');
     $('#close').onclick = function(){ closeSheet(); }; return;
   }
   var st = S.settings;
-  var srcName = st.basemap === 'mapbox' && st.mapboxToken ? 'mapbox' : 'usgs';
+  var localOn = st.basemap && st.basemap.indexOf('local:') === 0 && findLocal(st.basemap.slice(6));
+  var srcName = localOn ? st.basemap : (st.basemap === 'mapbox' && st.mapboxToken ? 'mapbox' : 'usgs');
+  var srcHere = srcFor(srcName);
   var el = openSheet(
     '<h3>Offline maps</h3>' +
     '<div class="sub">Saves satellite imagery for the area on your screen, so the map works with no signal. GPS and shot tracking do not need a data signal.</div>' +
     '<div id="areas"></div>' +
     '<div id="prog" class="note" hidden></div>' +
-    '<div class="stack"><button class="btn pri" id="saveArea">Save area on screen (' + SOURCES[srcName].label + ')</button><button class="btn danger" id="cancelDl" hidden>Stop download</button></div>' +
+    '<div class="stack"><button class="btn pri" id="saveArea">Save area on screen (' + esc(srcHere.label) + ')</button><button class="btn danger" id="cancelDl" hidden>Stop download</button></div>' +
     '<div class="note" id="usage"></div>' +
     '<div class="note">How: zoom and pan so the whole course fills the screen, then tap Save. This saves the imagery shown on the map now: ' +
-      (srcName === 'mapbox' ? 'Mapbox (zoom 14 to 19). Mapbox terms limit saved imagery to 30 days, so it is removed automatically after that. Fallback order is Mapbox, then OpenStreetMap (online only), then USGS, so save USGS too for an offline fallback that never expires.' : 'USGS (zoom 14 to 18).' + (st.basemap === 'osm' ? ' OpenStreetMap cannot be saved (its rules forbid offline downloads), so USGS is saved as the offline fallback.' : st.basemap === 'sat' ? ' Esri imagery cannot be saved (Esri only allows offline use through its native app toolkits), so USGS is saved as the offline fallback.' : '') + ' To save sharper Mapbox imagery, add a Mapbox token in Settings and switch the map to Mapbox first.') +
+      (localOn ? esc(srcHere.label) + ' (zoom ' + srcHere.zmin + ' to ' + srcHere.zmax + '). Nothing expires this the way Mapbox expires its own, so saved once, this course stays sharp. USGS shows through anywhere the flight line did not reach, so save USGS as well.'
+       : srcName === 'mapbox' ? 'Mapbox (zoom 14 to 19). Mapbox terms limit saved imagery to 30 days, so it is removed automatically after that. Fallback order is Mapbox, then OpenStreetMap (online only), then USGS, so save USGS too for an offline fallback that never expires.'
+       : 'USGS (zoom 14 to 18).' + (st.basemap === 'osm' ? ' OpenStreetMap cannot be saved (its rules forbid offline downloads), so USGS is saved as the offline fallback.' : st.basemap === 'sat' ? ' Esri imagery cannot be saved (Esri only allows offline use through its native app toolkits), so USGS is saved as the offline fallback.' : '') + ' For something sharper that saves with no expiry, try Sharper imagery in the menu first.') +
     '</div>' +
     '<div class="stack"><button class="btn ghost" id="clearAll">Delete all saved imagery</button><button class="btn ghost" id="close">Close</button></div>');
   function usage(){
@@ -4924,7 +5223,8 @@ function openOffline(){
     if (!S.offlineAreas.length){ box.innerHTML = '<div class="note">No saved areas yet.</div>'; return; }
     box.innerHTML = '<div class="rlist">' + S.offlineAreas.map(function(a, idx){
       var d = daysLeft(a);
-      return '<div class="ritem"><div class="rt">' + esc(a.name) + ' <span class="tag">' + areaSrc(a).label.toUpperCase() + '</span></div><div class="rs">' + niceDate(a.t) + ' · ' + a.ok + ' of ' + a.total + ' tiles · ' + mb(a.bytes) +
+      var tag = areaSrc(a).label.split('\u2014').pop().trim().slice(0, 18).toUpperCase();
+      return '<div class="ritem"><div class="rt">' + esc(a.name) + ' <span class="tag">' + esc(tag) + '</span></div><div class="rs">' + niceDate(a.t) + ' · ' + a.ok + ' of ' + a.total + ' tiles · ' + mb(a.bytes) +
         (d != null ? ' · expires in ' + d + ' day' + (d === 1 ? '' : 's') : '') + '</div>' +
         '<div class="rb"><button data-a="view" data-i="' + idx + '">Show</button><button data-a="del" data-i="' + idx + '">Delete</button></div></div>';
     }).join('') + '</div>';
@@ -4933,7 +5233,8 @@ function openOffline(){
         var a = S.offlineAreas[+bt.dataset.i];
         if (bt.dataset.a === 'view'){
           follow = false; closeSheet(true); map.fitBounds([[a.b.s, a.b.w], [a.b.n, a.b.e]], fitOpts());
-          var want = a.src === 'mapbox' && S.settings.mapboxToken ? 'mapbox' : 'usgs';
+          var want = a.src && a.src.indexOf('local:') === 0 && findLocal(a.src.slice(6)) ? a.src
+                   : a.src === 'mapbox' && S.settings.mapboxToken ? 'mapbox' : 'usgs';
           if (S.settings.basemap !== want){ S.settings.basemap = want; save(); setBase(); }
           return;
         }
@@ -4945,19 +5246,23 @@ function openOffline(){
   el.querySelector('#close').onclick = function(){ closeSheet(); };
   el.querySelector('#clearAll').onclick = function(){
     if (!confirm('Delete all saved map imagery from this phone? Rounds are not affected.')) return;
-    Promise.all(Object.keys(SOURCES).map(function(k){ return caches.delete(SOURCES[k].cache); }))
+    Promise.all(Object.keys(SOURCES).map(function(k){ return SOURCES[k].cache; }).concat([LOCAL_CACHE]).map(function(c){ return caches.delete(c); }))
       .then(function(){ S.offlineAreas = []; save(); drawAreas(); usage(); toast('Saved imagery deleted'); });
   };
   el.querySelector('#cancelDl').onclick = function(){ if (dl) dl.cancel = true; };
   el.querySelector('#saveArea').onclick = function(){
     if (dl){ toast('A download is already running.'); return; }
     if (!navigator.onLine){ toast('You need a data or Wi-Fi connection to save an area.'); return; }
-    var src = SOURCES[srcName];
+    var src = srcHere;
     var bb = map.getBounds(), b = {n:bb.getNorth(), s:bb.getSouth(), e:bb.getEast(), w:bb.getWest()};
     var n = tilesFor(b, src.zmin, src.zmax).length;
-    if (n > OFFLINE_MAX_TILES){ toast('That area needs ' + n + ' tiles (limit ' + OFFLINE_MAX_TILES + '). Zoom in so just the course fills the screen.', 5000); return; }
+    // tiles run from about 8 KB of mown fairway to 60 KB of trees, so 26 KB is a fair middle
+    var estMB = Math.max(1, Math.round(n * 26 / 1024));
+    if (n > OFFLINE_MAX_TILES || estMB > OFFLINE_MAX_MB){
+      toast('That area is about ' + n + ' tiles, roughly ' + estMB + ' MB (limit ' + OFFLINE_MAX_MB + ' MB). Zoom in so just the course fills the screen.', 5500); return;
+    }
     var r = active();
-    var name = prompt('Name this area (' + n + ' ' + src.label + ' tiles)', (r && r.course) || 'Course');
+    var name = prompt('Name this area (' + n + ' ' + src.label + ' tiles, about ' + estMB + ' MB)', (r && r.course) || 'Course');
     if (name === null) return;
     name = name.trim() || 'Course';
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function(){});
@@ -5126,14 +5431,16 @@ $('#tgtNext').onclick = function(){ placeStep(1); };
 $('#mapWrap').addEventListener('pointerdown', function(){ mapTouchedAt = Date.now(); }, {passive:true, capture:true});
 $('#centerBtn').onclick = function(){ follow = true; if (fix) map.setView([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); else toast('Waiting for GPS'); };
 $('#layerBtn').onclick = function(){
-  var st = S.settings, order = [];
+  var st = S.settings, order = localList().map(function(x){ return 'local:' + x.id; });
   if (st.mapboxToken) order.push('mapbox');
   if (st.arcgisKey) order.push('sat');
   order.push('osm', 'usgs');
   var i = order.indexOf(st.basemap);
   st.basemap = order[(i + 1) % order.length];
   save(); setBase();
-  toast({mapbox:'Mapbox satellite (offline in saved areas, 30 days)', usgs:'USGS satellite (offline in saved areas)', osm:'OpenStreetMap (online only, saved USGS underneath)', sat:'Esri satellite (online only, OSM and USGS underneath)'}[st.basemap]);
+  var rec = st.basemap.indexOf('local:') === 0 ? findLocal(st.basemap.slice(6)) : null;
+  toast(rec ? rec.label + ' (offline in saved areas, no expiry)'
+     : {mapbox:'Mapbox satellite (offline in saved areas, 30 days)', usgs:'USGS satellite (offline in saved areas)', osm:'OpenStreetMap (online only, saved USGS underneath)', sat:'Esri satellite (online only, OSM and USGS underneath)'}[st.basemap]);
 };
 
 /* ---------- boot ---------- */

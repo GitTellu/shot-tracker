@@ -2,6 +2,9 @@
 var APP_CACHE = 'st-app-v35';
 var USGS_CACHE = 'st-tiles-usgs-v1';
 var MAPBOX_CACHE = 'st-tiles-mapbox-v1';
+var LOCAL_CACHE = 'st-tiles-local-v1';
+// origins the app already routes itself, or that are online-only and must never be served stale
+var NOT_LOCAL = ['tile.openstreetmap.org', 'ibasemaps-api.arcgis.com', 'api.mapbox.com', 'cdnjs.cloudflare.com'];
 var MAPBOX_TTL_MS = 30 * 24 * 3600 * 1000; // Mapbox terms: on-device cache limited to 30 days
 var STATIC = [
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
@@ -30,6 +33,7 @@ self.addEventListener('fetch', function(e){
   var url = new URL(req.url);
   if (url.pathname.indexOf('/USGSImageryOnly/MapServer/tile/') >= 0){ e.respondWith(usgsTile(req)); return; }
   if (url.pathname.indexOf('/v4/mapbox.satellite/') >= 0){ e.respondWith(mapboxTile(req, url)); return; }
+  if (url.origin !== self.location.origin && STATIC.indexOf(req.url) < 0 && NOT_LOCAL.indexOf(url.hostname) < 0){ e.respondWith(localTile(req)); return; }
   if (STATIC.indexOf(req.url) >= 0){ e.respondWith(cacheFirst(req)); return; }
   if (url.origin === self.location.origin && (req.mode === 'navigate' || /\/(index\.html)?$/.test(url.pathname))){ e.respondWith(appShell(req, e)); return; }
   if (url.origin === self.location.origin && /\/(manifest\.json|icon-[\w-]+\.png)$/.test(url.pathname)){ e.respondWith(cacheFirst(req)); return; }
@@ -63,6 +67,20 @@ function mapboxTile(req, url){
         c.delete(key);
       }
       return fetch(req).catch(function(){ return offline(); });
+    });
+  });
+}
+
+/* County and regional imagery the app saved for a course. The cache is its own index:
+   whatever is in it is served, anything else goes straight to the network, so the worker
+   never has to be told which servers the phone has been pointed at. Agency services do not
+   impose the 30-day rule Mapbox does, so nothing here is aged out. */
+function localTile(req){
+  // a probe or a re-save asks for the network on purpose, and must not be answered from the cache
+  if (req.cache === 'reload' || req.cache === 'no-store') return fetch(req).catch(function(){ return offline(); });
+  return caches.open(LOCAL_CACHE).then(function(c){
+    return c.match(req.url).then(function(hit){
+      return hit || fetch(req).catch(function(){ return offline(); });
     });
   });
 }
