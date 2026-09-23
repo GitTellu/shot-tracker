@@ -81,6 +81,27 @@ button{font:inherit;color:inherit;cursor:pointer}
 .clab{flex:none;align-self:center;font-size:12px;color:var(--mut);width:46px;font-weight:700;text-transform:uppercase}
 .actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
 .actions .btn{font-size:16px;padding:0 4px;height:50px}
+/* What you are working on, in one line: the shots already played and the one you are on. */
+#holeStrip{display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;
+ margin:0 0 8px;padding-bottom:2px;scrollbar-width:none}
+#holeStrip::-webkit-scrollbar{display:none}
+#holeStrip .hs{flex:none;display:flex;align-items:baseline;gap:5px;padding:4px 9px;border-radius:999px;
+ border:1px solid var(--line);background:var(--srf2);font-size:12px;font-weight:800;color:var(--ink2);
+ white-space:nowrap;font-variant-numeric:tabular-nums}
+#holeStrip .hs i{font-style:normal;color:var(--mut);font-size:10.5px;font-weight:900}
+#holeStrip .hs em{font-style:normal;color:var(--mut);font-weight:700}
+#holeStrip .hs.now{border-color:var(--g2);background:var(--g3);color:var(--gink)}
+#holeStrip .hs.now i{color:var(--gink)}
+#holeStrip .hs.aim:after{content:"";width:7px;height:7px;border-radius:50%;background:var(--orange);align-self:center}
+/* On the green the units change: nobody reads a three foot putt in yards. */
+#puttBar{margin-bottom:8px}
+.pbTop{display:flex;align-items:baseline;gap:10px}
+.pbNum{font-size:34px;font-weight:900;line-height:1;letter-spacing:-.6px;font-variant-numeric:tabular-nums}
+.pbSub{flex:1;min-width:0;color:var(--mut);font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pbClose{flex:none;padding:4px 0 4px 8px}
+#pbClose svg{width:20px;height:20px;stroke:var(--gink);stroke-width:2.1;fill:none;stroke-linecap:round;display:block}
+.pbRow{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px}
+.pbRow .btn{height:52px;font-size:15px}
 #statusLine{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-height:38px}
 #grip{display:flex;align-items:center;justify-content:center;height:22px;margin:-10px 0 4px;touch-action:none;cursor:grab;-webkit-tap-highlight-color:transparent}
 #grip span{display:block;width:40px;height:4px;border-radius:99px;background:var(--grip);transition:width .16s var(--ease),background .16s var(--ease)}
@@ -105,6 +126,10 @@ button{font:inherit;color:inherit;cursor:pointer}
 #lcClubs .chip{padding:10px 13px}
 
 .plan{background:var(--warm);color:var(--warmink);border:2px solid var(--orange)}
+/* an aim already set reads as done rather than as an invitation */
+.btn.plan.aimed{background:var(--srf2);color:var(--ink2);border-color:var(--line)}
+.btn.plan.aimed:before{content:"";width:9px;height:9px;border-radius:50%;background:var(--orange);
+ margin-right:8px;flex:none;box-shadow:0 0 0 3px var(--warm)}
 .plan.on{background:#ff9800;color:#111}
 #planBox{margin-top:6px}
 .planHead{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
@@ -315,6 +340,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
    turning the box instead would spin it about the pane's origin and throw it off the screen. */
 .leaflet-tooltip.dtip{background:none;border:0;box-shadow:none;padding:0;color:#fff;font-weight:800;font-size:13px}
 .leaflet-tooltip.dtip .urot{display:inline-block;background:rgba(14,21,18,.86);padding:3px 7px;border-radius:9px;box-shadow:0 1px 4px rgba(0,0,0,.28)}
+.leaflet-tooltip.dtip.walk .urot{background:#C2185B}
 .leaflet-tooltip.dtip.hid{display:none}
 .leaflet-tooltip.dtip:before{display:none}
 #fatal{position:fixed;inset:0;z-index:5000;background:var(--srf);padding:24px;font-size:17px;line-height:1.5}
@@ -350,6 +376,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 
 <section id="panel">
   <div id="grip" role="button" tabindex="0" aria-label="Collapse the panel for more map"><span></span></div>
+  <div id="holeStrip" hidden></div>
   <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green</button><button id="greenBtn" class="link" hidden>Finish hole</button></div>
   <div id="planBox" hidden>
     <div class="planHead">
@@ -366,9 +393,15 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
     <div class="chips" id="planClubs" hidden></div>
     <button id="goBtn" class="btn pri" style="margin-top:12px">HIT IT</button>
   </div>
+  <div id="puttBar" hidden>
+    <div class="pbTop"><div class="pbNum" id="pbNum">&mdash;</div><div class="pbSub" id="pbSub"></div>
+      <button id="pbClose" class="link ichip" aria-label="Leave putting"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+    <div class="pbRow"><button id="pbPutt" class="btn sec">PUTT FROM HERE</button><button id="pbHoled" class="btn pri">HOLED IT</button></div>
+  </div>
   <div class="actions" id="actions">
     <button id="planBtn" class="btn plan">AIM</button>
     <button id="recBtn" class="btn pri">MARK BALL</button>
+    <button id="greenGoBtn" class="btn pri" hidden>PUTTING</button>
     <button id="holedBtn" class="btn pri" hidden>HOLED IT</button>
   </div>
 </section>
@@ -467,7 +500,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.22.0', SCHEMA = 5;
+var APP_VERSION = '1.23.0', SCHEMA = 5;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -850,17 +883,91 @@ function shotPhase(h, open){
   if (d >= WALKED_YD) return 'walked';
   return phase === 'walked' ? 'walked' : 'atball';
 }
+/* Hole 5, three shots played, now on the fourth with a wedge in hand — in one line, because
+   the map is what the screen is for. */
+function renderStrip(){
+  var el = $('#holeStrip'); if (!el) return;
+  var h = curHole(), r = active();
+  if (!r || !h){ el.hidden = true; return; }
+  var open = openShot(h), parts = [];
+  parts.push('<span class="hs"><i>HOLE</i>' + h.n + '</span>');
+  h.shots.forEach(function(sh, i){
+    var d = shotDistYd(h, i), live = sh === open;
+    parts.push('<span class="hs' + (live ? ' now' : '') + (sh.plan ? ' aim' : '') + '">' +
+      '<i>' + (i + 1) + '</i>' + esc(sh.club || '–') +
+      (d == null ? (live ? '<em>in play</em>' : '') : '<em>' + r0(d) + ' yd</em>') + '</span>');
+  });
+  if (!open && !h.green)
+    parts.push('<span class="hs now"><i>' + (h.shots.length + 1) + '</i><em>next</em></span>');
+  if (h.green)
+    parts.push('<span class="hs"><i>SCORE</i>' + holeScore(h) + '</span>');
+  el.innerHTML = parts.join('');
+  el.hidden = false;
+  var now = el.querySelector('.hs.now');
+  if (now && now.scrollIntoView) now.scrollIntoView({inline:'end', block:'nearest'});
+}
+/* Putting is a different game with different units, so it gets its own bar. The distance to the
+   pin is measured rather than paced, which is the whole reason to carry a GPS onto a green. */
+var putting = false, puttKey = null;
+function feetToPin(){
+  var g = greenFor(curHole());
+  if (!g || !fix) return null;
+  return distM(fix, g) / 0.3048;
+}
+function ftLabel(ft){
+  if (ft == null) return '\u2014';
+  return ft < 100 ? Math.round(ft) + ' ft' : r0(ft * 0.3048 / M_PER_YD) + ' yd';
+}
+function startPutting(){
+  var h = curHole();
+  if (!h){ toast('Start a round first'); return; }
+  if (!greenFor(h)){ toast('Place this hole\u2019s green first, so putts can be measured.', 4500); return; }
+  if (plan) endPlan(true);
+  putting = true; puttKey = holeKey(); hideResult(); renderStatus(); layout();
+  toast('Stand at your ball and tap PUTT FROM HERE. Every tap measures that putt.', 4500);
+}
+function endPutting(){ putting = false; puttKey = null; renderStatus(); layout(); }
+function puttFromHere(){
+  var h = curHole(); if (!h) return;
+  var ft = feetToPin();
+  if (ft == null){ toast('No GPS fix yet.'); return; }
+  var c = ensureCard(h);
+  c.putts.push({ft:Math.round(ft), read:null, act:null, out:null});
+  if (h.green) h.green.putts = c.putts.length;
+  save(); renderStatus(); renderHole(false);
+  toast(plural(c.putts.length, 'putt') + ' \u00b7 this one from ' + Math.round(ft) + ' ft', 2600);
+}
+function renderPutt(){
+  var h = curHole(), c = cardOf(h), n = c ? c.putts.length : 0;
+  $('#pbNum').textContent = ftLabel(feetToPin());
+  var last = n ? c.putts[n - 1] : null;
+  $('#pbSub').textContent = 'to the pin \u00b7 ' + (n ? plural(n, 'putt') + ' so far' +
+    (last && last.ft != null ? ' \u00b7 last from ' + last.ft + ' ft' : '') : 'no putts yet');
+}
+window.__startPutting = startPutting; window.__endPutting = endPutting;
+window.__putting = function(){ return putting; };
 /* One primary button, and it is whatever you are about to do. */
 function renderActions(h){
-  var pb = $('#planBtn'), rb = $('#recBtn'), hb = $('#holedBtn');
+  var pb = $('#planBtn'), rb = $('#recBtn'), hb = $('#holedBtn'), gg = $('#greenGoBtn'), bar = $('#puttBar');
+  // putting belongs to the hole it started on: stepping away ends it
+  if (putting && puttKey === holeKey() && phase !== 'done'){
+    bar.hidden = false; $('#actions').hidden = true; $('#statusLine').hidden = true; renderPutt(); return;
+  }
+  putting = false;
+  bar.hidden = true;
   $('#actions').hidden = !!plan;
-  if (plan) return;
+  $('#statusLine').hidden = !!(S.settings && S.settings.peek) || !!plan;
+  if (plan){ hb.hidden = true; gg.hidden = true; return; }
   var green = phase === 'green' && h && h.shots.length;
-  hb.hidden = !green;
+  // on the green the choice is between settling the ball and starting to putt
+  gg.hidden = !green;
+  hb.hidden = true;
   pb.hidden = !!green;
   rb.hidden = false;
-  if (green){ rb.className = 'btn ghost'; rb.textContent = 'MARK BALL'; return; }
-  pb.textContent = 'AIM';
+  if (green){ rb.className = 'btn ghost'; rb.textContent = 'MARK BALL'; pb.classList.remove('aimed'); return; }
+  var open = openShot(h), aimed = !!(open && open.plan);
+  pb.textContent = aimed ? 'RE-AIM' : 'AIM';
+  pb.classList.toggle('aimed', aimed);
   rb.textContent = phase === 'walked' ? "I'M AT MY BALL" : 'MARK BALL';
   if (phase === 'walked'){ pb.className = 'btn ghost'; rb.className = 'btn pri'; }
   else { pb.className = 'btn plan'; rb.className = 'btn ghost'; }
@@ -869,6 +976,7 @@ function renderActions(h){
    where you are, so you never have to guess which button is the next move. */
 function renderStatus(){
   var main = $('#stMain'), sub = $('#stSub'); if (!main) return;
+  renderStrip();
   var h = curHole(), open = openShot(h), ls = lockState();
   var rr = active();
   var gps = rr && rr.ended ? 'round ended' :
@@ -893,7 +1001,9 @@ function renderStatus(){
     sub.textContent = (toG == null ? 'Tee shot' : 'Hole ' + h.n + ' · tee shot') + gTail; return;
   }
   var d = fix ? r0(yd(distM(open, fix))) : null;
-  main.textContent = toG != null ? ydLabel(toG) + ' to the green'
+  // on the green the pin is feet away, and saying it in yards as well is the same number twice
+  main.textContent = phase === 'green' ? ftLabel(feetToPin()) + ' to the pin'
+                   : toG != null ? ydLabel(toG) + ' to the green'
                                  : (d == null ? '—' : d + ' yd') + ' from your ball';
   // no green placed means the headline is already the walk, so do not say it twice
   var where = phase === 'green' ? 'On the green'
@@ -1283,6 +1393,9 @@ function saveGreen(advance){
   // deliberately no re-framing: you are on to the next one. Stop following the phone though, or
   // the map creeps back to it a metre at a time on every fix.
   follow = false;
+  // remember how far away this green is from here, so the next re-frame is judged against the
+  // moment it was placed rather than against whenever the auto-fit first got a look in
+  if (fix) autoFitD = distM(fix, c.greens[placing.n]);
   save();
   if (advance === true) placing.setup = true;
   var done = greensPlaced(), setup = placing.setup;
@@ -1349,15 +1462,30 @@ function fitHole(){
   return true;
 }
 window.__fitOpts = fitOpts;
+/* Re-framing is for when the hole no longer fits the screen, not for every step. The rule was
+   purely relative, so close to the green a couple of paces was a large fraction and the map
+   jumped — worst exactly where you least want it, walking round a green with a putter. It now
+   needs a real distance as well as a relative one, takes its first sight of a green as a
+   baseline rather than an excuse to re-frame, and never fires while you are putting. */
+var AUTOFIT_MIN_M = 25;
 function maybeAutoFit(){
-  if (follow || placing || aimDragging || !fix || !booted || awayFromCourse()) return;
+  if (follow || placing || aimDragging || putting || !fix || !booted || awayFromCourse()) return;
   var g = greenFor(curHole()); if (!g) return;
   if (Date.now() - mapTouchedAt < 10000 || Date.now() - autoFitAt < 8000) return;
   var d = distM(fix, g);
-  if (autoFitD != null && Math.abs(d - autoFitD) / Math.max(1, autoFitD) < 0.15) return;
+  // First sight of a green: if it is already on screen there is nothing to re-frame, so just
+  // remember the distance. If it is off screen, frame it once.
+  if (autoFitD == null){
+    if (map.getBounds().contains(L.latLng(g.lat, g.lng))){ autoFitD = d; return; }
+    fitHole(); return;
+  }
+  var moved = Math.abs(d - autoFitD);
+  if (moved < AUTOFIT_MIN_M || moved / Math.max(1, autoFitD) < 0.15) return;
   fitHole();
 }
 window.__fitHole = fitHole;
+window.__autoFitState = function(){ return {d:autoFitD, at:autoFitAt, touched:mapTouchedAt,
+  follow:follow, putting:putting, placing:!!placing, away:awayFromCourse(), now:Date.now()}; };
 window.__mapView = function(){ var c = map.getCenter(); return {zoom:map.getZoom(), lat:c.lat, lng:c.lng}; }; // exposed for testing
 
 /* ---------- the hole card: the whole story of a hole ----------
@@ -1463,7 +1591,9 @@ window.__declutter = declutter; window.__relabel = relabel;
    the map. Planning hides it too, because the plan box says all of the same things. */
 function applyPeek(){
   var on = !!(S.settings && S.settings.peek);
-  $('#statusLine').hidden = on || !!plan;
+  // the plan box and the putting bar each own the headline while they are up
+  $('#statusLine').hidden = on || !!plan || putting;
+  $('#holeStrip').hidden = !!plan;   // the strip survives a fold: it is the cheapest line on the screen
   $('#grip').setAttribute('aria-expanded', on ? 'false' : 'true');
   layout();
 }
@@ -1574,8 +1704,21 @@ function greenLabel(){
 }
 function updateLive(){
   var h = curHole(), open = openShot(h);
-  if (open && fix) liveLine.setLatLngs([[open.lat, open.lng], [fix.lat, fix.lng]]);
-  else liveLine.setLatLngs([]);
+  /* Walking to your ball, the one number you want is how far the shot has carried you. The line
+     from where you hit it to where you are is already drawn; give it the number, live. */
+  if (open && fix){
+    liveLine.setLatLngs([[open.lat, open.lng], [fix.lat, fix.lng]]);
+    var wd = yd(distM(open, fix));
+    if (wd >= 25){
+      var txt = '<span class="urot">' + r0(wd) + ' yd so far</span>';
+      if (liveLine.getTooltip()) liveLine.setTooltipContent(txt);
+      else liveLine.bindTooltip(txt, {permanent:true, direction:'center', className:'dtip walk'});
+      liveLine.openTooltip();
+    } else if (liveLine.getTooltip()) liveLine.unbindTooltip();
+  } else {
+    liveLine.setLatLngs([]);
+    if (liveLine.getTooltip()) liveLine.unbindTooltip();
+  }
   if (markers.cgreen && markers.cgreen.setTooltipContent){ markers.cgreen.setTooltipContent('<span class="urot">' + greenLabel() + '</span>'); relabel(); }
   renderStatus();
 }
@@ -1769,7 +1912,12 @@ function onPlanGo(){
   markBall({plan:p, club:club}).then(function(res){
     if (!res) return;
     var h = res.h, closed = res.closed, i;
-    if (res.remarked){ showResult({main:'Ball re-marked', sub:'Same spot as your last mark, so it was moved rather than counted as another shot', h:h, shot:res.shot, ask:!res.shot.club, separate:res.opts}); return; }
+    if (res.remarked){
+      showResult({main:'Aim set \u00b7 ' + esc(club || 'club?'),
+        sub:'Aiming ' + r0(yd(distM(res.shot, p))) + ' yd. Your ball stays where you marked it \u2014 walk on and tap I\u2019M AT MY BALL when you get there.',
+        h:h, shot:res.shot, ask:!res.shot.club});
+      return;
+    }
     if (closed){
       i = h.shots.indexOf(closed);
       showResult({main:(closed.club ? closed.club + ' · ' : '') + r0(shotDistYd(h, i)) + ' yd', sub:'Your previous shot, now measured', h:h, shot:closed, ask:!closed.club});
@@ -3800,6 +3948,10 @@ $('#planEdit').onclick = function(){ if (plan) openPatternEdit(plan.club); };
 $('#planClubBtn').onclick = function(){ if (plan) renderPlanBox($('#planClubs').hidden); };
 $('#greenBtn').onclick = onGreen;
 $('#holedBtn').onclick = onGreen;
+$('#greenGoBtn').onclick = startPutting;
+$('#pbClose').onclick = endPutting;
+$('#pbPutt').onclick = puttFromHere;
+$('#pbHoled').onclick = function(){ putting = false; puttKey = null; onGreen(); };
 /* Drag the grip down for more map, up to bring the line back. A tap does the same, so it
    works for anyone who does not think to drag it. */
 (function(){
