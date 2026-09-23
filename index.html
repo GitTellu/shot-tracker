@@ -548,7 +548,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.25.1', SCHEMA = 7;
+var APP_VERSION = '1.25.2', SCHEMA = 7;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -1648,18 +1648,32 @@ window.__mapView = function(){ var c = map.getCenter(); return {zoom:map.getZoom
    measured along your own line to it, and lists the tee boxes for planning. Nothing is guessed:
    a hole the map does not have is reported as missing, par is only taken where the map gives
    it, and anything you placed by hand stays yours unless you say otherwise. */
-var OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+var OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
 var OSM_ATTR = 'Course &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+/* Tries each public Overpass server in turn. When all of them fail, the error carries what each
+   one said, so the sheet can show the real reason rather than a guess about the connection. */
 function overpassQuery(q){
-  var i = 0;
+  var i = 0, why = [];
   function attempt(){
     var ctl = ('AbortController' in window) ? new AbortController() : null;
     var timer = ctl ? setTimeout(function(){ ctl.abort(); }, 60000) : null;
     // a form post is a "simple" request, so no CORS preflight is needed
     return fetch(OVERPASS[i], {method:'POST', body:'data=' + encodeURIComponent(q),
       headers:{'Content-Type':'application/x-www-form-urlencoded'}, signal:ctl ? ctl.signal : undefined})
-      .then(function(res){ clearTimeout(timer); if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
-      .catch(function(err){ clearTimeout(timer); if (++i < OVERPASS.length) return attempt(); throw err; });
+      .then(function(res){
+        clearTimeout(timer);
+        if (!res.ok) return res.text().catch(function(){ return ''; }).then(function(t){
+          var m = /<strong[^>]*>([\s\S]*?)<\/strong>\s*([^<]*)/.exec(t);   // Overpass explains itself in the HTML body
+          throw new Error('HTTP ' + res.status + (m ? ': ' + (m[1] + ' ' + m[2]).replace(/\s+/g, ' ').trim().slice(0, 140) : ''));
+        });
+        return res.json().catch(function(){ throw new Error('reply was not JSON'); });
+      })
+      .catch(function(err){
+        clearTimeout(timer);
+        why.push(OVERPASS[i].split('/')[2] + ': ' + (err && err.name === 'AbortError' ? 'no answer in 60 s' : (err && err.message) || String(err)));
+        if (++i < OVERPASS.length) return attempt();
+        var e = new Error(why.join('; ')); e.overpass = true; throw e;
+      });
   }
   return attempt();
 }
@@ -1922,8 +1936,10 @@ function openOsmImport(){
         '<br><small style="color:var(--mut);font-weight:600">' + ydLabel(yd(f.d)) + ' away</small></span><span class="mchev">›</span></button>';
     }).join('') + '</div>' : '';
     Array.prototype.forEach.call(list.querySelectorAll('.mrow'), function(b){ b.onclick = function(){ osmFetchCourse(found[+b.dataset.i]); }; });
-  }).catch(function(){
-    var s = el.querySelector('#oiSub'); if (s) s.textContent = 'Could not reach OpenStreetMap. This needs a connection; try again in a moment.';
+  }).catch(function(err){
+    var s = el.querySelector('#oiSub'); if (!s) return;
+    s.textContent = err && err.overpass ? 'OpenStreetMap did not answer. What each server said:' : 'Something went wrong reading the answer. Please send this:';
+    s.insertAdjacentHTML('afterend', '<div class="note" style="margin-top:0;word-break:break-word">' + esc((err && err.message) || String(err)) + '</div>');
   });
 }
 function osmFetchCourse(f){
@@ -1936,9 +1952,10 @@ function osmFetchCourse(f){
     .then(function(j){
       if ($('#sheetWrap').hidden || !el.querySelector('#close')) return;
       openOsmSummary(f, osmConvert(j.elements || [], {type:f.type, id:f.id}));
-    }).catch(function(){
-      if ($('#sheetWrap').hidden) return;
-      el.querySelector('.sub').textContent = 'Could not read the course from OpenStreetMap. This needs a connection; try again in a moment.';
+    }).catch(function(err){
+      if ($('#sheetWrap').hidden || !el.querySelector('.sub')) return;
+      el.querySelector('.sub').textContent = err && err.overpass ? 'OpenStreetMap did not answer. What each server said:' : 'Something went wrong reading the course. Please send this:';
+      el.querySelector('.sub').insertAdjacentHTML('afterend', '<div class="note" style="margin-top:0;word-break:break-word">' + esc((err && err.message) || String(err)) + '</div>');
     });
 }
 /* Which saved course an import lands in: the one already made from this map entry, or, when it is
