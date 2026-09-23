@@ -3474,7 +3474,7 @@ function planReport(r){
   return {rows:rows, t:t};
 }
 window.__planReport = function(){ return planReport(active()); };
-function signed(v){ var x = Math.round(v * 10) / 10; return x === 0 ? 'E' : (x > 0 ? '+' : '−') + Math.abs(x); }   // against par: E for level, as a card says it
+function signed(v){ var a = Math.round(v * 10) / 10; return a === 0 ? 'E' : (a > 0 ? '+' : '−') + Math.abs(a); }   // against par: E for even, the way a card says it
 function openPlanReview(r){
   var rep = planReport(r), t = rep.t;
   if (!rep.rows.length){ toast('No hole of this round was played with a plan. Menu, Course, Plan the round.', 4000); return; }
