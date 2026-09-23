@@ -596,7 +596,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.29.0', SCHEMA = 8;
+var APP_VERSION = '1.30.0', SCHEMA = 8;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', localSources:[], wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -5012,10 +5012,22 @@ function looksImagery(url){ return /ortho|imagery|aerial|photo|drapp|naip|basema
    couple of kilometres either way is enough to catch a course without dragging in every
    layer in the state. Titles and owners come from whoever published them, so they are
    shown escaped and nothing is believed until a tile proves it. */
+/* An item's extent in degrees across, or null when it does not declare one. A county's
+   orthophotography is a fraction of a degree; a global weather feed is 360. */
+function extentSpan(it){
+  var e = it && it.extent;
+  if (!e || !e[0] || !e[1]) return null;
+  var w = Math.abs(e[1][0] - e[0][0]), h = Math.abs(e[1][1] - e[0][1]);
+  if (!isFinite(w) || !isFinite(h)) return null;
+  return Math.max(w, h);
+}
+var MAX_SPAN_DEG = 4;   // a county is well under one; a whole state is a few
 function agolNearby(lat, lng){
   var d = 0.02;
   var q = '(imagery OR orthoimagery OR orthophoto OR aerial) AND (type:"Map Service" OR type:"Image Service")';
-  var u = AGOL_SEARCH + '?f=json&num=40&sortField=modified&sortOrder=desc' +
+  // Sorting by modified put every hourly weather feed on the planet at the top, because they
+  // are always the most recently changed thing in the catalogue. Relevance instead.
+  var u = AGOL_SEARCH + '?f=json&num=100' +
     '&bbox=' + encodeURIComponent([lng - d, lat - d, lng + d, lat + d].join(',')) +
     '&q=' + encodeURIComponent(q);
   var note = function(){};
@@ -5027,9 +5039,29 @@ function agolNearby(lat, lng){
     if (!d2) return [];
     if (!d2.results){ agolNearby.why = 'the catalogue answered without a result list'; return []; }
     var all = d2.results.length;
-    var out = d2.results.filter(function(it){ return it.url && /\/(Map|Image)Server\/?$/.test(it.url); })
-      .map(function(it){ return {label:(it.title || 'Imagery') + (it.owner ? ' (' + it.owner + ')' : ''), url:it.url.replace(/\/$/, '')}; });
-    agolNearby.why = all ? 'the catalogue listed ' + all + ', ' + out.length + ' of them map or image services'
+    var svc = d2.results.filter(function(it){ return it.url && /\/(Map|Image)Server\/?$/.test(it.url); });
+    /* bbox asks which items OVERLAP this spot, not which are ABOUT it, so anything published
+       with a world extent matches every course on earth. Judge locality by the item's own
+       extent and put the tightest first: that is the county, not the planet. */
+    var global = 0;
+    var local = svc.filter(function(it){
+      var sp = extentSpan(it);
+      if (sp != null && sp > MAX_SPAN_DEG){ global++; return false; }
+      return true;
+    });
+    local.sort(function(a, b){
+      var sa = extentSpan(a), sb = extentSpan(b);
+      if (sa == null) sa = MAX_SPAN_DEG; if (sb == null) sb = MAX_SPAN_DEG;
+      var ia = looksImagery((a.title || '') + ' ' + (a.url || '')) ? 0 : 1;
+      var ib = looksImagery((b.title || '') + ' ' + (b.url || '')) ? 0 : 1;
+      return (ia - ib) || (sa - sb);
+    });
+    var out = local.map(function(it){
+      return {label:(it.title || 'Imagery') + (it.owner ? ' (' + it.owner + ')' : ''), url:it.url.replace(/\/$/, '')};
+    });
+    agolNearby.why = all ? 'the catalogue listed ' + all + ', ' + svc.length + ' map or image services, ' +
+                           out.length + ' of them local to here' +
+                           (global ? ' (' + global + ' covered the whole world and were skipped)' : '')
                          : 'the catalogue has nothing published over this spot';
     note();
     return out;
@@ -5233,7 +5265,7 @@ function openImagery(){
       if (agolNearby.why) why.push('Catalogue: ' + agolNearby.why + '.');
       status(items.length ? 'Checking ' + items.length + ' published layer' + (items.length === 1 ? '' : 's') + '\u2026'
                           : 'The catalogue lists none here. Trying known servers\u2026');
-      return items.slice(0, 10).reduce(function(p, it){
+      return items.slice(0, 25).reduce(function(p, it){
         return p.then(function(){
           return agsTiled(it.url).then(function(t){
             // a rejected service used to vanish without a word, so twenty rejections and an
