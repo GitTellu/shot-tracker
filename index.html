@@ -507,19 +507,18 @@ var OFFLINE_MAX_MB = 220;        // the real guard: tiles vary from 8 KB of fair
 var LOCAL_CACHE = 'st-tiles-local-v1';
 var LOCAL_ZMIN = 14;
 
-/* Places to go looking for public agency imagery. Counties and regional councils fly 3 in
-   and 6 in orthophotos, against 0.6 m for the USGS layer and 0.3-0.5 m for the commercial
-   ones, so where one of these answers it is much the sharpest picture of the course.
+/* Counties and regional councils fly 3 in and 6 in orthophotos, against 0.6 m for the USGS
+   layer and 0.3-0.5 m for the commercial ones, so where one of them covers a course it is
+   much the sharpest picture of it there is.
 
-   Only the first address below has been seen published; the other two follow the usual
-   pattern for an ArcGIS site and may simply not exist. That is deliberate and harmless:
-   nothing here is trusted, a server becomes a map layer only once the app has fetched a
-   tile from it at the course and seen real imagery come back, and anything that does not
-   answer is dropped without comment. Paste an address in the sheet to add your own. */
+   Finding one used to mean knowing a county's server address. Most of them publish through
+   ArcGIS Online instead, which has a public catalogue that can be searched by where you are
+   standing, so the app asks that first and only falls back to a list of addresses. Nothing
+   here is trusted either way: something becomes a map layer only once a tile has been
+   fetched from it at the course and seen to have imagery in it. */
+var AGOL_SEARCH = 'https://www.arcgis.com/sharing/rest/search';
 var IMAGERY_SERVERS = [
-  {label:'Adams County, CO', root:'https://gisapp.adcogov.org/arcgis/rest/services'},
-  {label:'Broomfield, CO', root:'https://gis.broomfield.org/arcgis/rest/services', guess:true},
-  {label:'Colorado state portal', root:'https://geodata.colorado.gov/server/rest/services', guess:true}
+  {label:'Adams County, CO', root:'https://gisapp.adcogov.org/arcgis/rest/services'}
 ];
 
 /* Imagery sources that may be saved on the phone.
@@ -4992,7 +4991,24 @@ function agsTiled(url){
 }
 /* Imagery services are not labelled as such, so the name is a hint and the tile is proof. */
 function looksImagery(url){ return /ortho|imagery|aerial|photo|drapp|naip|basemap/i.test(url); }
-window.__imagery = {probeTile:probeTile, probeSource:probeSource, agsCatalog:agsCatalog, agsTiled:agsTiled, mPerPx:mPerPx, srcFor:srcFor, servers:IMAGERY_SERVERS}; // exposed for testing
+
+/* The public ArcGIS Online catalogue, asked what imagery is published over this spot. A
+   couple of kilometres either way is enough to catch a course without dragging in every
+   layer in the state. Titles and owners come from whoever published them, so they are
+   shown escaped and nothing is believed until a tile proves it. */
+function agolNearby(lat, lng){
+  var d = 0.02;
+  var q = '(imagery OR orthoimagery OR orthophoto OR aerial) AND (type:"Map Service" OR type:"Image Service")';
+  var u = AGOL_SEARCH + '?f=json&num=40&sortField=modified&sortOrder=desc' +
+    '&bbox=' + encodeURIComponent([lng - d, lat - d, lng + d, lat + d].join(',')) +
+    '&q=' + encodeURIComponent(q);
+  return fetch(u, {mode:'cors'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(d2){
+    if (!d2 || !d2.results) return [];
+    return d2.results.filter(function(it){ return it.url && /\/(Map|Image)Server\/?$/.test(it.url); })
+      .map(function(it){ return {label:(it.title || 'Imagery') + (it.owner ? ' (' + it.owner + ')' : ''), url:it.url.replace(/\/$/, '')}; });
+  }).catch(function(){ return []; });
+}
+window.__imagery = {probeTile:probeTile, probeSource:probeSource, agsCatalog:agsCatalog, agsTiled:agsTiled, agolNearby:agolNearby, mPerPx:mPerPx, srcFor:srcFor, servers:IMAGERY_SERVERS, setSearch:function(u){ AGOL_SEARCH = u; }}; // exposed for testing
 
 function daysLeft(a){ var s = areaSrc(a); return s.ttl ? Math.max(0, Math.ceil((a.t + s.ttl - Date.now()) / 86400000)) : null; }
 var offlineOK = ('caches' in window) && ('serviceWorker' in navigator) && window.isSecureContext;
@@ -5151,13 +5167,31 @@ function openImagery(){
   el.querySelector('#scan').onclick = function(){
     if (busy) return;
     busy = true; resEl.innerHTML = '';
-    var n = 0;
-    IMAGERY_SERVERS.reduce(function(p, srv){
-      return p.then(function(){ return discoverServer(srv, lat, lng, function(f){ n++; addResult(f); }, status); });
-    }, Promise.resolve()).then(function(){
+    var n = 0, seen = {};
+    function found(f){ if (seen[f.tpl]) return; seen[f.tpl] = 1; n++; addResult(f); }
+    status('Asking what imagery is published over this spot\u2026');
+    // the catalogue first, because it needs no knowledge of who flies this county
+    agolNearby(lat, lng).then(function(items){
+      status(items.length ? 'Checking ' + items.length + ' published layer' + (items.length === 1 ? '' : 's') + '\u2026'
+                          : 'The catalogue lists none here. Trying known servers\u2026');
+      return items.slice(0, 10).reduce(function(p, it){
+        return p.then(function(){
+          return agsTiled(it.url).then(function(t){
+            if (!t) return;
+            return probeSource(t.tpl, t.topZ, lat, lng).then(function(r){
+              if (r.ok) found({label:it.label, tpl:t.tpl, zmax:r.zmax, attribution:'Imagery: ' + esc(it.label)});
+            });
+          }).catch(function(){});
+        });
+      }, Promise.resolve());
+    }).then(function(){
+      return IMAGERY_SERVERS.reduce(function(p, srv){
+        return p.then(function(){ return discoverServer(srv, lat, lng, found, status); });
+      }, Promise.resolve());
+    }).then(function(){
       busy = false;
       status(n ? n + ' source' + (n === 1 ? ' covers' : 's cover') + ' this course.'
-               : 'Nothing found. The servers in the list may be unreachable from a browser, or may not publish imagery for here. Paste your county GIS tile address below instead.');
+               : 'Nothing published covers this spot, or the servers that hold it will not answer a browser. Paste your county GIS tile address below instead.');
     });
   };
   el.querySelector('#addUrl').onclick = function(){
