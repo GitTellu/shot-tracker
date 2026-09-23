@@ -596,7 +596,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.28.0', SCHEMA = 8;
+var APP_VERSION = '1.29.0', SCHEMA = 8;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', localSources:[], wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -4990,10 +4990,17 @@ function agsCatalog(root){
 }
 /* Cached, Web Mercator, and tiled: anything else cannot be dropped straight into Leaflet. */
 function agsTiled(url){
+  agsTiled.why = null;
   return agsJson(url).then(function(d){
-    if (!d || !d.tileInfo || !d.tileInfo.lods || !d.tileInfo.lods.length) return null;
+    if (!d){ agsTiled.why = 'did not describe itself'; return null; }
+    if (!d.tileInfo || !d.tileInfo.lods || !d.tileInfo.lods.length){
+      agsTiled.why = 'not a cached tile service'; return null;
+    }
     var wk = (d.tileInfo.spatialReference || {});
-    if ((wk.latestWkid || wk.wkid) !== 3857 && (wk.latestWkid || wk.wkid) !== 102100) return null;
+    if ((wk.latestWkid || wk.wkid) !== 3857 && (wk.latestWkid || wk.wkid) !== 102100){
+      agsTiled.why = 'tiled in grid ' + (wk.latestWkid || wk.wkid) + ', not the one the map uses';
+      return null;
+    }
     var top = d.tileInfo.lods[d.tileInfo.lods.length - 1].level;
     return {tpl:url + '/tile/{z}/{y}/{x}', topZ:top, name:(d.documentInfo && d.documentInfo.Title) || url.split('/').slice(-2)[0]};
   });
@@ -5011,11 +5018,25 @@ function agolNearby(lat, lng){
   var u = AGOL_SEARCH + '?f=json&num=40&sortField=modified&sortOrder=desc' +
     '&bbox=' + encodeURIComponent([lng - d, lat - d, lng + d, lat + d].join(',')) +
     '&q=' + encodeURIComponent(q);
-  return fetch(u, {mode:'cors'}).then(function(r){ return r.ok ? r.json() : null; }).then(function(d2){
-    if (!d2 || !d2.results) return [];
-    return d2.results.filter(function(it){ return it.url && /\/(Map|Image)Server\/?$/.test(it.url); })
+  var note = function(){};
+  agolNearby.why = null;
+  return fetch(u, {mode:'cors'}).then(function(r){
+    if (!r.ok){ agolNearby.why = 'the catalogue answered ' + r.status; return null; }
+    return r.json().catch(function(){ agolNearby.why = 'the catalogue did not answer with JSON'; return null; });
+  }).then(function(d2){
+    if (!d2) return [];
+    if (!d2.results){ agolNearby.why = 'the catalogue answered without a result list'; return []; }
+    var all = d2.results.length;
+    var out = d2.results.filter(function(it){ return it.url && /\/(Map|Image)Server\/?$/.test(it.url); })
       .map(function(it){ return {label:(it.title || 'Imagery') + (it.owner ? ' (' + it.owner + ')' : ''), url:it.url.replace(/\/$/, '')}; });
-  }).catch(function(){ return []; });
+    agolNearby.why = all ? 'the catalogue listed ' + all + ', ' + out.length + ' of them map or image services'
+                         : 'the catalogue has nothing published over this spot';
+    note();
+    return out;
+  }).catch(function(e){
+    agolNearby.why = 'the catalogue could not be reached from the browser (' + (e && e.message ? e.message : 'network or CORS') + ')';
+    return [];
+  });
 }
 window.__imagery = {probeTile:probeTile, probeSource:probeSource, agsCatalog:agsCatalog, agsTiled:agsTiled, agolNearby:agolNearby, mPerPx:mPerPx, srcFor:srcFor, servers:IMAGERY_SERVERS, setSearch:function(u){ AGOL_SEARCH = u; }}; // exposed for testing
 
@@ -5149,6 +5170,7 @@ function openImagery(){
     '<div class="stack"><button class="btn pri" id="scan">Look for imagery at this course</button></div>' +
     '<div id="status" class="note" hidden></div>' +
     '<div id="results"></div>' +
+    '<div id="imgWhy" hidden></div>' +
     '<label class="fl">Or paste a service address<input id="url" autocomplete="off" placeholder="https://\u2026/MapServer"></label>' +
     '<div class="note">An ArcGIS MapServer or ImageServer address, or a tile pattern with {z}/{x}/{y} in it. County and city GIS or open-data pages publish these: for the two counties north of Denver, look at Adams County GIS and Broomfield\u2019s open data site. The map only keeps it if a tile really comes back for this course.</div>' +
     '<div class="stack"><button class="btn" id="addUrl">Test this address</button></div>' +
@@ -5203,21 +5225,25 @@ function openImagery(){
   el.querySelector('#scan').onclick = function(){
     if (busy) return;
     busy = true; resEl.innerHTML = '';
-    var n = 0, seen = {};
+    var n = 0, seen = {}, why = [];
     function found(f){ if (seen[f.tpl]) return; seen[f.tpl] = 1; n++; addResult(f); }
     status('Asking what imagery is published over this spot\u2026');
     // the catalogue first, because it needs no knowledge of who flies this county
     agolNearby(lat, lng).then(function(items){
+      if (agolNearby.why) why.push('Catalogue: ' + agolNearby.why + '.');
       status(items.length ? 'Checking ' + items.length + ' published layer' + (items.length === 1 ? '' : 's') + '\u2026'
                           : 'The catalogue lists none here. Trying known servers\u2026');
       return items.slice(0, 10).reduce(function(p, it){
         return p.then(function(){
           return agsTiled(it.url).then(function(t){
-            if (!t) return;
+            // a rejected service used to vanish without a word, so twenty rejections and an
+            // empty catalogue produced exactly the same message
+            if (!t){ why.push(it.label + ': ' + (agsTiled.why || 'not usable as tiles') + '.'); return; }
             return probeSource(t.tpl, t.topZ, lat, lng).then(function(r){
               if (r.ok) found({label:it.label, tpl:t.tpl, zmax:r.zmax, attribution:'Imagery: ' + esc(it.label)});
+              else why.push(it.label + ': tiled, but no imagery at this course.');
             });
-          }).catch(function(){});
+          }).catch(function(e){ why.push(it.label + ': ' + ((e && e.message) || 'could not be checked') + '.'); });
         });
       }, Promise.resolve());
     }).then(function(){
@@ -5226,8 +5252,16 @@ function openImagery(){
       }, Promise.resolve());
     }).then(function(){
       busy = false;
-      status(n ? n + ' source' + (n === 1 ? ' covers' : 's cover') + ' this course.'
-               : 'Nothing published covers this spot, or the servers that hold it will not answer a browser. Paste your county GIS tile address below instead.');
+      if (n){ status(n + ' source' + (n === 1 ? ' covers' : 's cover') + ' this course.'); return; }
+      // say what was actually tried and what each one said, so a failed scan is something
+      // that can be acted on rather than a dead end
+      var box = el.querySelector('#imgWhy');
+      if (box){
+        box.hidden = !why.length;
+        box.innerHTML = why.length ? '<div class="fl">What the scan found</div>' +
+          '<div class="note" style="text-align:left">' + why.map(esc).join('<br>') + '</div>' : '';
+      }
+      status('Nothing usable covers this spot. Paste your county GIS tile address below instead.');
     });
   };
   el.querySelector('#addUrl').onclick = function(){
