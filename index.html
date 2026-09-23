@@ -43,7 +43,7 @@
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%} /* Chrome on Android inflates text otherwise, which stretched button labels onto two lines */
-#stMain,#stSub,#planNum,#planSub,#rcMain,#gps,.pnum,.pin,.dtip,.stepv,.stats,.mh2,.rt,.rs,.tval{
+#stMain,#stSub,#stFB,#planNum,#planSub,#rcMain,#gps,.pnum,.pin,.dtip,.stepv,.stats,.mh2,.rt,.rs,.tval{
  font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
 html,body{height:100%;margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg);-webkit-tap-highlight-color:transparent;overscroll-behavior:none;-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;cursor:pointer}
@@ -87,6 +87,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 #grip:active span{width:56px;background:#B9C6BF}
 #stMain{font-size:19px;font-weight:800;line-height:1.15}
 #stSub{font-size:13px;color:var(--mut);font-weight:600}
+#stFB{flex:none;margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;font-size:13px;font-weight:800;color:var(--ink2);line-height:1.3;padding-top:1px}
+#stFB b{color:var(--mut);font-weight:700;margin-right:3px}
+.teebox{width:12px;height:12px;border-radius:3px;background:#fff;border:2px solid #15734A;box-shadow:0 1px 3px rgba(0,0,0,.45);transform:rotate(var(--unrot,0deg))}
+.teebox.on{background:#15734A;border-color:#fff;width:16px;height:16px}
+.fbdot{width:12px;height:12px;border-radius:50%;background:#fff;border:3px solid #15734A;box-shadow:0 1px 3px rgba(0,0,0,.45)}
 #resultCard{position:fixed;left:8px;right:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);z-index:2500;background:var(--srf);border-radius:18px;box-shadow:0 -2px 18px rgba(0,0,0,.35);padding:14px 16px calc(env(safe-area-inset-bottom) + 14px);max-height:80vh;overflow:auto}
 .rcHead{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
 .rcActs{display:flex;align-items:center;gap:2px;flex:none;white-space:nowrap}
@@ -350,7 +355,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 
 <section id="panel">
   <div id="grip" role="button" tabindex="0" aria-label="Collapse the panel for more map"><span></span></div>
-  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><button id="tgtBtn" class="link" hidden>Set green</button><button id="greenBtn" class="link" hidden>Finish hole</button></div>
+  <div id="statusLine"><div><div id="stMain">Ready</div><div id="stSub"></div></div><div id="stFB" hidden></div><button id="tgtBtn" class="link" hidden>Set green</button><button id="greenBtn" class="link" hidden>Finish hole</button></div>
   <div id="planBox" hidden>
     <div class="planHead">
       <div id="planNum" class="pnum">— yd</div>
@@ -467,13 +472,15 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.22.0', SCHEMA = 5;
+var APP_VERSION = '1.23.0', SCHEMA = 6;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
   if (!j || j.v !== 1) return d;
   j.settings = Object.assign(d.settings, j.settings || {}); j.rounds = j.rounds || []; j.offlineAreas = j.offlineAreas || [];
   j.courses = j.courses || []; // v1.5: greens you place yourself, kept per course and reused every round
+  // v1.23 (schema 6): a course may also carry osm (where it came from), geo (holes, green outlines,
+  // tee boxes and hazards from OpenStreetMap) and fb (front and back edges placed by hand). All optional.
   if (!('playingId' in j)) j.playingId = null;
   if ((j.schema || 1) < 3) j.settings.wake = false; // v1.1: the phone can sleep between shots by default
   j.schema = SCHEMA;
@@ -882,6 +889,10 @@ function renderStatus(){
   // the link is the way out when no green is placed and the app cannot tell you are on one
   $('#greenBtn').hidden = !unfinished || phase === 'green';
   $('#tgtBtn').hidden = !(h && !greenFor(h) && !placing) || unfinished;
+  // front and back beside the centre number, only while they are a golf distance and still ahead of you
+  var fb = (h && !h.green && fix && toG != null && toG < 700) ? fcbFor({lat:fix.lat, lng:fix.lng}, courseFor(false), h.n) : null, fbEl = $('#stFB');
+  fbEl.hidden = !(fb && fb.f != null && fb.b != null);
+  if (!fbEl.hidden) fbEl.innerHTML = '<span><b>F</b>' + r0(fb.f) + '</span><span><b>B</b>' + r0(fb.b) + '</span>';
   if (!active() || !h){ main.textContent = 'Ready to play'; sub.textContent = 'AIM your tee shot, or MARK BALL where it lies · ' + gps; return; }
   if (h.green){
     main.textContent = 'Hole ' + h.n + ' · ' + holeScore(h) + ' strokes';
@@ -1205,21 +1216,22 @@ var greenPickIcon = L.divIcon({className:'', html:'<div class="gflag">' + GFLAG 
 var placing = null;
 /* Two ways in, and they want different things. Setting up a whole course walks you hole to hole;
    coming to fix one green should put you back where you were, not march you on to hole 2. */
-function startPlaceGreen(setup){
+function startPlaceGreen(setup, kind){
   var h = curHole();
   if (!h){ toast('Start a round first'); return; }
   if (plan) endPlan(true);
   follow = false;   // nothing should move the map while you are aiming at a green
   $('#tgtBar').hidden = false;
-  enterPlacing(h, !!setup);
+  enterPlacing(h, !!setup, kind);
   renderHole(false); layout();
 }
 /* Aim at this hole's green, keeping the map exactly where it is. */
-function enterPlacing(h, setup){
-  var g = greenFor(h);
-  var wasSetup = setup == null ? !!(placing && placing.setup) : !!setup;
+function enterPlacing(h, setup, kind){
+  kind = kind || 'green';
+  var c = courseFor(false), g = kind === 'green' ? greenFor(h) : (c && c.fb && c.fb[h.n] && c.fb[h.n][kind]) || null;
+  var wasSetup = kind !== 'green' ? false : setup == null ? !!(placing && placing.setup) : !!setup;
   if (placing && placing.marker) map.removeLayer(placing.marker);
-  placing = {n:h.n, pt:g ? {lat:g.lat, lng:g.lng} : null, marker:null, setup:wasSetup};
+  placing = {n:h.n, pt:g ? {lat:g.lat, lng:g.lng} : null, marker:null, setup:wasSetup, kind:kind};
   if (placing.pt) placeGreenMarker(placing.pt);
   drawTgtBar();
 }
@@ -1229,13 +1241,14 @@ function greensPlaced(){
 }
 function drawTgtBar(){
   if (!placing) return;
-  var r = active(), g = greenFor(curHole()), setup = placing.setup;
-  $('#tgtText').textContent = 'Hole ' + placing.n + ': ' +
-    (g ? 'green already placed \u2014 tap or drag to move it.' : 'tap the centre of the green.') +
-    (setup && !greensPlaced() ? ' Save moves you on to the next hole.' : '');
+  var r = active(), g = greenFor(curHole()), setup = placing.setup, edge = {f:'front', b:'back'}[placing.kind];
+  $('#tgtText').textContent = 'Hole ' + placing.n + ': ' + (edge
+    ? (placing.pt ? edge + ' edge placed \u2014 tap or drag to move it.' : 'tap the ' + edge + ' edge of the green, on the line you usually play in from.')
+    : (g ? 'green already placed \u2014 tap or drag to move it.' : 'tap the centre of the green.') +
+      (setup && !greensPlaced() ? ' Save moves you on to the next hole.' : ''));
   $('#tgtCount').textContent = setup ? greensPlaced() + ' OF 18 PLACED' : '';
   $('#tgtPrev').hidden = !setup; $('#tgtNext').hidden = !setup;
-  $('#tgtSweep').hidden = setup;   // in setup mode plain Save already moves you on
+  $('#tgtSweep').hidden = setup || !!edge;   // in setup mode plain Save already moves you on
   $('#tgtPrev').disabled = !r || r.cur <= 0;
   $('#tgtDone').textContent = setup ? 'Done' : 'Cancel';
   layout();
@@ -1259,7 +1272,7 @@ function placeGreenMarker(ll){
   placing.pt = {lat:ll.lat, lng:ll.lng};
   if (placing.marker){ placing.marker.setLatLng(ll); }
   else {
-    placing.marker = L.marker([ll.lat, ll.lng], {icon:greenPickIcon, draggable:!bearing, zIndexOffset:2500}).addTo(map);
+    placing.marker = L.marker([ll.lat, ll.lng], {icon:placing.kind === 'green' ? greenPickIcon : fbIcon, draggable:!bearing, zIndexOffset:2500}).addTo(map);
     placing.marker.on('drag', function(e){ var p = e.target.getLatLng(); placing.pt = {lat:p.lat, lng:p.lng}; });
     attachRotDrag(placing.marker, {move:function(p){ placing.pt = {lat:p.lat, lng:p.lng}; }});
   }
@@ -1275,9 +1288,17 @@ window.__placeStep = placeStep; window.__startPlaceGreen = startPlaceGreen;
    sweep, so you can carry straight on without going back through the menu. */
 function saveGreen(advance){
   if (!placing) return;
-  if (!placing.pt){ toast('Tap the centre of the green first'); return; }
+  if (!placing.pt){ toast(placing.kind === 'green' ? 'Tap the centre of the green first' : 'Tap the edge of the green first'); return; }
   var c = courseFor(true);
   if (!c){ toast('Start a round first'); return; }
+  if (placing.kind !== 'green'){
+    c.fb = c.fb || {}; c.fb[placing.n] = c.fb[placing.n] || {};
+    c.fb[placing.n][placing.kind] = {lat:+placing.pt.lat.toFixed(7), lng:+placing.pt.lng.toFixed(7)};
+    var en = placing.n, ek = placing.kind;
+    follow = false; save(); endPlaceGreen();
+    toast((ek === 'f' ? 'Front' : 'Back') + ' edge saved for hole ' + en + '.', 2500);
+    return;
+  }
   c.greens[placing.n] = {lat:+placing.pt.lat.toFixed(7), lng:+placing.pt.lng.toFixed(7), t:Date.now()};
   var n = placing.n;
   // deliberately no re-framing: you are on to the next one. Stop following the phone though, or
@@ -1292,16 +1313,21 @@ function saveGreen(advance){
   toast('Hole ' + n + ' saved \u00b7 ' + done + ' of 18', 1800);
 }
 function openCourseGreen(h){
-  var c = courseFor(false), g = greenFor(h);
+  var c = courseFor(false), g = greenFor(h), geo = geoOf(c, h.n), fb = (c && c.fb && c.fb[h.n]) || {};
+  if (geo && geo.green && !(g && ptInRing(g, geo.green))) geo = null;   // the outline only counts while the centre is on it
   var el = openSheet(
     '<h3>Green &middot; Hole ' + h.n + '</h3>' +
     '<div class="sub">' + (g ? 'Saved for ' + esc(c ? c.name : 'this course') + ' and reused every round here. Yardages are measured to this point.'
-                             : 'No green placed for this hole yet.') + '</div>' +
+                             : 'No green placed for this hole yet.') +
+      (g && geo && geo.green ? ' Front and back come from the green\'s outline in OpenStreetMap, measured along your own line to it.' : '') +
+      (g && !(geo && geo.green) ? ' Front and back: ' + (fb.f && fb.b ? 'both placed.' : fb.f || fb.b ? 'one of two placed.' : 'not placed. Place them for front and back yardages.') : '') + '</div>' +
     '<div class="stack">' +
     '<button class="btn" id="gMove">' + (g ? 'Move it' : 'Place it') + '</button>' +
+    (g && !(geo && geo.green) ? '<div class="row" style="margin-top:0"><button class="btn sec" id="gFront">' + (fb.f ? 'Move front' : 'Set front') + '</button><button class="btn sec" id="gBack">' + (fb.b ? 'Move back' : 'Set back') + '</button></div>' : '') +
     (g ? '<button class="btn sec" id="gClear">Remove it</button>' : '') +
     '<button class="btn ghost" id="close">Close</button></div>');
   el.querySelector('#gMove').onclick = function(){ closeSheet(true); startPlaceGreen(); };
+  ['f', 'b'].forEach(function(k){ var b = el.querySelector(k === 'f' ? '#gFront' : '#gBack'); if (b) b.onclick = function(){ closeSheet(true); startPlaceGreen(false, k); }; });
   if (g) el.querySelector('#gClear').onclick = function(){
     if (c && c.greens) delete c.greens[h.n];
     save(); closeSheet(true); renderHole(false); toast('Green removed from hole ' + h.n);
@@ -1359,6 +1385,385 @@ function maybeAutoFit(){
 }
 window.__fitHole = fitHole;
 window.__mapView = function(){ var c = map.getCenter(); return {zoom:map.getZoom(), lat:c.lat, lng:c.lng}; }; // exposed for testing
+
+/* ---------- the course from OpenStreetMap ----------
+   Many courses are mapped in OpenStreetMap: each hole as a line from tee to green, and the
+   greens, tee boxes, bunkers and water as outlines. Importing one fills in every green, so the
+   yardages work on a first visit, gives each green its real shape, so the front and back can be
+   measured along your own line to it, and lists the tee boxes for planning. Nothing is guessed:
+   a hole the map does not have is reported as missing, par is only taken where the map gives
+   it, and anything you placed by hand stays yours unless you say otherwise. */
+var OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+var OSM_ATTR = 'Course &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+function overpassQuery(q){
+  var i = 0;
+  function attempt(){
+    var ctl = ('AbortController' in window) ? new AbortController() : null;
+    var timer = ctl ? setTimeout(function(){ ctl.abort(); }, 60000) : null;
+    // a form post is a "simple" request, so no CORS preflight is needed
+    return fetch(OVERPASS[i], {method:'POST', body:'data=' + encodeURIComponent(q),
+      headers:{'Content-Type':'application/x-www-form-urlencoded'}, signal:ctl ? ctl.signal : undefined})
+      .then(function(res){ clearTimeout(timer); if (!res.ok) throw new Error('HTTP ' + res.status); return res.json(); })
+      .catch(function(err){ clearTimeout(timer); if (++i < OVERPASS.length) return attempt(); throw err; });
+  }
+  return attempt();
+}
+function llOf(p){ return {lat:p[0], lng:p[1]}; }
+function lastOf(a){ return a[a.length - 1]; }
+/* Overpass geometry to [[lat,lng],...], dropping vertices under a metre apart (and, for an
+   outline, the closing vertex that repeats the first). */
+function llPath(geom, closed){
+  var out = [];
+  geom.forEach(function(g){
+    if (!g || g.lat == null) return;
+    var p = [+g.lat.toFixed(6), +g.lon.toFixed(6)];
+    if (!out.length || distM(llOf(lastOf(out)), llOf(p)) >= 1) out.push(p);
+  });
+  if (closed && out.length > 3 && distM(llOf(out[0]), llOf(lastOf(out))) < 1) out.pop();
+  return out;
+}
+/* A multipolygon's outer edge can arrive as several open ways; join them end to end into rings. */
+function joinRings(paths){
+  var segs = paths.filter(function(p){ return p.length >= 2; }).map(function(p){ return p.slice(); }), rings = [];
+  function same(a, b){ return Math.abs(a[0] - b[0]) < 1e-6 && Math.abs(a[1] - b[1]) < 1e-6; }
+  while (segs.length){
+    var ring = segs.shift(), grew = true;
+    while (grew && !same(ring[0], lastOf(ring))){
+      grew = false;
+      for (var i = 0; i < segs.length; i++){
+        var s = segs[i];
+        if (same(lastOf(ring), s[0])) ring = ring.concat(s.slice(1));
+        else if (same(lastOf(ring), lastOf(s))) ring = ring.concat(s.slice(0, -1).reverse());
+        else continue;
+        segs.splice(i, 1); grew = true; break;
+      }
+    }
+    if (ring.length > 3 && same(ring[0], lastOf(ring))) ring.pop();
+    if (ring.length >= 3) rings.push(ring);
+  }
+  return rings;
+}
+function ringXY(o, ring){ return ring.map(function(p){ return toXY(o, llOf(p)); }); }
+function ptInRing(pt, ring){
+  var P = ringXY(pt, ring), inside = false;
+  for (var i = 0, j = P.length - 1; i < P.length; j = i++){
+    var a = P[i], b = P[j];
+    if ((a.y > 0) !== (b.y > 0) && 0 < (b.x - a.x) * (0 - a.y) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+function segOff(a, b){ // distance from the origin to segment ab, and how far along it the nearest point is
+  var dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+  var t = l2 ? Math.max(0, Math.min(1, -(a.x * dx + a.y * dy) / l2)) : 0;
+  return {d:Math.hypot(a.x + t * dx, a.y + t * dy), t:t, len:Math.sqrt(l2)};
+}
+function distToRing(pt, ring){
+  if (ptInRing(pt, ring)) return 0;
+  var P = ringXY(pt, ring), best = Infinity;
+  for (var i = 0; i < P.length; i++) best = Math.min(best, segOff(P[i], P[(i + 1) % P.length]).d);
+  return best;
+}
+function ringCentroid(ring){
+  var o = llOf(ring[0]), P = ringXY(o, ring), a = 0, cx = 0, cy = 0;
+  for (var i = 0; i < P.length; i++){
+    var p = P[i], q = P[(i + 1) % P.length], k = p.x * q.y - q.x * p.y;
+    a += k; cx += (p.x + q.x) * k; cy += (p.y + q.y) * k;
+  }
+  var c;
+  if (Math.abs(a) < 1e-6){ cx = 0; cy = 0; P.forEach(function(p){ cx += p.x; cy += p.y; }); c = fromXY(o, cx / P.length, cy / P.length); }
+  else c = fromXY(o, cx / (3 * a), cy / (3 * a));
+  return {lat:+c.lat.toFixed(7), lng:+c.lng.toFixed(7)};
+}
+/* Where a point sits against a hole's line of play: off = metres from the line, along = metres
+   from the tee end to the nearest point on it, total = the line's length. */
+function lineInfo(pt, line){
+  var P = ringXY(pt, line), best = {off:Infinity, along:0}, run = 0;
+  for (var i = 0; i < P.length - 1; i++){
+    var s = segOff(P[i], P[i + 1]);
+    if (s.d < best.off) best = {off:s.d, along:run + s.t * s.len};
+    run += s.len;
+  }
+  best.total = run;
+  return best;
+}
+function pointAlong(line, d){
+  for (var i = 0; i < line.length - 1; i++){
+    var a = llOf(line[i]), b = llOf(line[i + 1]), l = distM(a, b);
+    if (d <= l || i === line.length - 2){ var B = toXY(a, b), t = l ? Math.min(1, Math.max(0, d / l)) : 0; return fromXY(a, B.x * t, B.y * t); }
+    d -= l;
+  }
+  return llOf(line[0]);
+}
+function teeTag(t){ return t.name || t.tee || t.colour || t['tee:colour'] || null; }
+function teeDefaultLabel(i, n){ return n === 1 ? 'Tee' : n === 2 ? ['Back', 'Forward'][i] : n === 3 ? ['Back', 'Middle', 'Forward'][i] : 'Tee ' + (i + 1); }
+
+/* Overpass elements -> {holes:{n:{line, green, gc, par, si, tees, hz}}, probs, counts}.
+   ref names the golf course picked, so holes of a course next door can be told apart. */
+function osmConvert(els, ref){
+  var probs = [];
+  var course = els.filter(function(e){ return e.tags && e.tags.leisure === 'golf_course' && (!ref || (e.type === ref.type && e.id === ref.id)); })[0] || null;
+  var bounds = [];
+  if (course && course.type === 'way' && course.geometry) bounds = [llPath(course.geometry, true)];
+  else if (course && course.members) bounds = joinRings(course.members.filter(function(m){ return m.role === 'outer' && m.geometry; }).map(function(m){ return llPath(m.geometry, false); }));
+  bounds = bounds.filter(function(r){ return r.length >= 3; });
+  function inCourse(p){ return !bounds.length || bounds.some(function(r){ return ptInRing(p, r); }); }
+  var ways = els.filter(function(e){ return e.type === 'way' && e.tags && e.geometry && e.geometry.length; });
+  function areas(test){
+    return ways.filter(function(e){ return test(e.tags); })
+      .map(function(e){ return {id:e.id, tags:e.tags, p:llPath(e.geometry, true)}; })
+      .filter(function(a){ return a.p.length >= 3; });
+  }
+  var greens = areas(function(t){ return t.golf === 'green'; });
+  var tees = areas(function(t){ return t.golf === 'tee'; }).map(function(a){ a.c = ringCentroid(a.p); return a; })
+    .concat(els.filter(function(e){ return e.type === 'node' && e.tags && e.tags.golf === 'tee' && e.lat != null; })
+      .map(function(e){ return {id:e.id, tags:e.tags, p:null, c:{lat:e.lat, lng:e.lon}}; }));
+  var bunkers = areas(function(t){ return t.golf === 'bunker'; });
+  var water = areas(function(t){ return t.golf === 'water_hazard' || t.golf === 'lateral_water_hazard' || t.natural === 'water' || !!t.water; });
+
+  var all = ways.filter(function(e){ return e.tags.golf === 'hole' && e.geometry.length >= 2; })
+    .map(function(e){ return {id:e.id, n:parseInt(e.tags.ref, 10), tags:e.tags, line:llPath(e.geometry, false)}; })
+    .filter(function(h){ return h.line.length >= 2; });
+  var unnumbered = all.filter(function(h){ return !(h.n >= 1 && h.n <= 36); }).length;
+  if (unnumbered) probs.push(plural(unnumbered, 'hole line has', 'hole lines have') + ' no hole number, so ' + (unnumbered === 1 ? 'it was' : 'they were') + ' left out.');
+  var numbered = all.filter(function(h){ return h.n >= 1 && h.n <= 36; });
+  var mine = numbered.filter(function(h){ return inCourse(llOf(h.line[Math.floor(h.line.length / 2)])); });
+  if (!mine.length && numbered.length){ mine = numbered; probs.push('None of the holes sit inside the course outline, so all of them were used.'); }
+  else if (mine.length < numbered.length) probs.push(plural(numbered.length - mine.length, 'hole') + ' belonging to a neighbouring course ' + (numbered.length - mine.length === 1 ? 'was' : 'were') + ' left out.');
+  var byN = {}, holes = [];
+  mine.forEach(function(h){
+    if (byN[h.n]){ if (byN[h.n] === 1) probs.push('Hole ' + h.n + ' is mapped more than once; the first one was used.'); byN[h.n]++; return; }
+    byN[h.n] = 1; holes.push(h);
+  });
+  holes.sort(function(a, b){ return a.n - b.n; });
+
+  // a hole line is meant to run tee to green, but not every mapper draws it that way round
+  function greenGap(p){ var b = Infinity; greens.forEach(function(g){ b = Math.min(b, distToRing(p, g.p)); }); return b; }
+  holes.forEach(function(h){ if (greenGap(llOf(h.line[0])) < greenGap(llOf(lastOf(h.line)))) h.line.reverse(); });
+  var claimed = {};
+  holes.forEach(function(h){
+    var end = llOf(lastOf(h.line)), g = greens.filter(function(x){ return !claimed[x.id] && ptInRing(end, x.p); })[0];
+    if (g){ h.green = g; claimed[g.id] = true; }
+  });
+  holes.forEach(function(h){
+    if (h.green) return;
+    var end = llOf(lastOf(h.line)), best = null, bd = 25;
+    greens.forEach(function(g){ if (claimed[g.id]) return; var d = distToRing(end, g.p); if (d < bd){ bd = d; best = g; } });
+    if (best){ h.green = best; claimed[best.id] = true; }
+    else probs.push('Hole ' + h.n + ': no green is mapped at the end of the hole. Place that one by hand.');
+  });
+  // a tee box belongs to the hole it sits on the back end of
+  var teesUsed = 0;
+  tees.forEach(function(t){
+    var best = null, bo = 40;
+    holes.forEach(function(h){
+      var li = lineInfo(t.c, h.line);
+      if (li.along <= Math.max(0.55 * li.total, 1) && li.off < bo){ bo = li.off; best = h; }
+    });
+    if (best){ (best.tees = best.tees || []).push(t); teesUsed++; }
+  });
+  function nearestHole(a, reach){
+    var c = ringCentroid(a.p), best = null, bd = reach;
+    holes.forEach(function(h){
+      var d = lineInfo(c, h.line).off;
+      for (var i = 0; i < a.p.length && d > 0; i += Math.max(1, Math.floor(a.p.length / 40))) d = Math.min(d, lineInfo(llOf(a.p[i]), h.line).off);
+      if (d < bd){ bd = d; best = h; }
+    });
+    return best;
+  }
+  var nb = 0, nw = 0;
+  bunkers.forEach(function(a){ var h = nearestHole(a, 60); if (h){ (h.hz = h.hz || []).push({k:'bunker', p:a.p}); nb++; } });
+  water.forEach(function(a){ var h = nearestHole(a, 60); if (h){ (h.hz = h.hz || []).push({k:'water', p:a.p}); nw++; } });
+
+  var out = {}, pars = 0, gn = 0;
+  holes.forEach(function(h){
+    var gc = h.green ? ringCentroid(h.green.p) : null, end = gc || llOf(lastOf(h.line));
+    var par = parseInt(h.tags.par, 10), si = parseInt(h.tags.handicap, 10);
+    var ts = (h.tees || []).sort(function(a, b){ return distM(b.c, end) - distM(a.c, end); });
+    if (par >= 3 && par <= 6) pars++; else par = null;
+    if (gc) gn++;
+    out[h.n] = {line:h.line, green:h.green ? h.green.p : null, gc:gc, par:par, si:si >= 1 && si <= 18 ? si : null,
+      tees:ts.map(function(t, i){ return {id:'o' + t.id, label:teeTag(t.tags) || teeDefaultLabel(i, ts.length), c:[+t.c.lat.toFixed(7), +t.c.lng.toFixed(7)], p:t.p}; }),
+      hz:h.hz || []};
+  });
+  var nums = holes.map(function(h){ return h.n; }), top = nums.length ? Math.max.apply(null, nums) : 0, missing = [];
+  for (var n = 1; n <= top; n++) if (!byN[n] || holes.every(function(h){ return h.n !== n; })) missing.push(n);
+  if (missing.length) probs.unshift('Not in the map: ' + (missing.length === 1 ? 'hole ' : 'holes ') + missing.join(', ') + '. Place ' + (missing.length === 1 ? 'that green' : 'those greens') + ' by hand.');
+  if (holes.length && pars < holes.length) probs.push('Par is mapped for ' + pars + ' of ' + holes.length + ' holes. Set the rest on the scorecard.');
+  if (holes.length && tees.length === 0) probs.push('No tee boxes are mapped. Planning starts from the tee end of each hole line instead.');
+  return {name:course && course.tags ? (course.tags.name || '') : '', holes:out, probs:probs,
+    counts:{holes:holes.length, greens:gn, tees:teesUsed, pars:pars, bunkers:nb, water:nw, nums:nums}};
+}
+window.__osmConvert = osmConvert;
+
+/* Front, centre and back from where you stand. With a mapped green they are where your own line
+   to the centre crosses its edge, near and far, so they change as you walk round it. Without
+   one, the front and back points you placed by hand. Null for either when it cannot be known,
+   and for both when you are standing on the green. */
+function fcbFor(from, c, n){
+  var g = c && c.greens && c.greens[n]; if (!g || !from) return null;
+  var out = {c:yd(distM(from, g)), f:null, b:null}, geo = c.geo && c.geo[n];
+  // an outline only measures the green whose centre sits inside it: a centre moved by hand off
+  // the mapped green means the outline is not the green you are playing to
+  if (geo && geo.green && ptInRing(g, geo.green)){
+    if (ptInRing(from, geo.green)) return out;
+    var P = ringXY(from, geo.green), G = toXY(from, g), L = Math.hypot(G.x, G.y); if (L < 1) return out;
+    var ux = G.x / L, uy = G.y / L, ts = [];
+    for (var i = 0; i < P.length; i++){
+      var A = P[i], B = P[(i + 1) % P.length], dx = B.x - A.x, dy = B.y - A.y, den = ux * dy - uy * dx;
+      if (Math.abs(den) < 1e-9) continue;
+      var t = (A.x * dy - A.y * dx) / den, s = (A.x * uy - A.y * ux) / den;
+      if (s >= 0 && s <= 1 && t > 0) ts.push(t);
+    }
+    if (ts.length >= 2){ out.f = yd(Math.min.apply(null, ts)); out.b = yd(Math.max.apply(null, ts)); }
+  } else if (c.fb && c.fb[n]){
+    if (c.fb[n].f) out.f = yd(distM(from, c.fb[n].f));
+    if (c.fb[n].b) out.b = yd(distM(from, c.fb[n].b));
+  }
+  return out;
+}
+window.__fcbFor = fcbFor;
+function geoOf(c, n){ return (c && c.geo && c.geo[n]) || null; }
+
+/* OpenStreetMap's licence asks for credit wherever its data is shown, so the credit is on the map
+   exactly while a course drawn from it is. */
+var osmAttrOn = false;
+function courseAttr(c){
+  var want = !!(c && c.osm);
+  if (want === osmAttrOn || !map.attributionControl) return;
+  if (want) map.attributionControl.addAttribution(OSM_ATTR); else map.attributionControl.removeAttribution(OSM_ATTR);
+  osmAttrOn = want;
+}
+
+/* Menu, Course, Import from OpenStreetMap. It looks around the middle of the map, so it works
+   from the sofa as well as from the first tee. */
+function importCentre(){
+  if (map.getZoom() < 12 && fix) return {lat:fix.lat, lng:fix.lng};
+  var c = map.getCenter(); return {lat:c.lat, lng:c.lng};
+}
+function osmNote(){
+  return '<div class="note">Course maps come from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>, drawn by volunteers, so how complete a course is varies. The import says exactly what it found.</div>';
+}
+function openOsmImport(){
+  var at = importCentre(), around = '(around:5000,' + at.lat.toFixed(6) + ',' + at.lng.toFixed(6) + ')';
+  var el = openSheet('<h3>Import a course</h3><div class="sub" id="oiSub">Looking for golf courses within three miles of the middle of the map&hellip;</div>' +
+    '<div id="oiList"></div>' + osmNote() + '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+  overpassQuery('[out:json][timeout:25];(way["leisure"="golf_course"]' + around + ';relation["leisure"="golf_course"]' + around + ';);out tags center bb;').then(function(j){
+    var list = el.querySelector('#oiList'); if (!list || $('#sheetWrap').hidden) return;   // closed while it was looking
+    var found = (j.elements || []).filter(function(e){ return e.center && e.bounds; }).map(function(e){
+      return {type:e.type, id:e.id, name:(e.tags && e.tags.name) || 'Unnamed golf course', bounds:e.bounds, d:distM(at, {lat:e.center.lat, lng:e.center.lon})};
+    }).sort(function(a, b){ return a.d - b.d; });
+    el.querySelector('#oiSub').textContent = found.length
+      ? 'Pick the course. Nearest to the middle of the map first.'
+      : 'No golf courses are mapped within three miles of the middle of the map. Scroll the map to the course and try again, or place the greens by hand.';
+    list.innerHTML = found.length ? '<div class="mgrp">' + found.map(function(f, i){
+      return '<button class="mrow" data-i="' + i + '">' + icon('flag') + '<span>' + esc(f.name) +
+        '<br><small style="color:var(--mut);font-weight:600">' + ydLabel(yd(f.d)) + ' away</small></span><span class="mchev">›</span></button>';
+    }).join('') + '</div>' : '';
+    Array.prototype.forEach.call(list.querySelectorAll('.mrow'), function(b){ b.onclick = function(){ osmFetchCourse(found[+b.dataset.i]); }; });
+  }).catch(function(){
+    var s = el.querySelector('#oiSub'); if (s) s.textContent = 'Could not reach OpenStreetMap. This needs a connection; try again in a moment.';
+  });
+}
+function osmFetchCourse(f){
+  var b = f.bounds, pad = 0.0015;   // about 150 m round the outline, for tees and greens drawn just outside it
+  var bb = [b.minlat - pad, b.minlon - pad * 1.3, b.maxlat + pad, b.maxlon + pad * 1.3].map(function(v){ return v.toFixed(6); }).join(',');
+  var el = openSheet('<h3>' + esc(f.name) + '</h3><div class="sub">Reading the holes, greens and tee boxes&hellip;</div><div class="stack"><button class="btn ghost" id="close">Cancel</button></div>');
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+  overpassQuery('[out:json][timeout:90];' + f.type + '(' + f.id + ');out geom;(' +
+    'way["golf"~"^(hole|green|tee|bunker|water_hazard|lateral_water_hazard)$"](' + bb + ');node["golf"="tee"](' + bb + ');way["natural"="water"](' + bb + '););out geom;')
+    .then(function(j){
+      if ($('#sheetWrap').hidden || !el.querySelector('#close')) return;
+      openOsmSummary(f, osmConvert(j.elements || [], {type:f.type, id:f.id}));
+    }).catch(function(){
+      if ($('#sheetWrap').hidden) return;
+      el.querySelector('.sub').textContent = 'Could not read the course from OpenStreetMap. This needs a connection; try again in a moment.';
+    });
+}
+/* Which saved course an import lands in: the one already made from this map entry, or, when it is
+   for the round you are playing, that round's course, so greens and pars placed by hand merge in. */
+function osmTarget(f, link){
+  var same = S.courses.filter(function(c){ return c.osm && c.osm.type === f.type && c.osm.id === f.id; })[0] || null;
+  var r = active();
+  if (link && r){
+    var rc = courseFor(false);
+    if (rc && (!rc.osm || (rc.osm.type === f.type && rc.osm.id === f.id))) return rc;
+  }
+  return same;
+}
+function openOsmSummary(f, conv){
+  var r = active(), n = conv.counts;
+  if (!n.holes){
+    var e0 = openSheet('<h3>' + esc(f.name) + '</h3><div class="sub">OpenStreetMap has this course\'s outline but none of its holes, so there is nothing to import. You can still place the greens by hand.</div>' +
+      osmNote() + '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
+    e0.querySelector('#close').onclick = function(){ closeSheet(); };
+    return;
+  }
+  var canLink = !!(r && !r.ended);
+  var span = n.nums.length ? n.nums[0] + (n.nums.length > 1 ? '–' + lastOf(n.nums) : '') : '';
+  var row = function(k, v){ return '<tr><td>' + k + '</td><td>' + v + '</td></tr>'; };
+  var el = openSheet('<h3>' + esc(conv.name || f.name) + '</h3>' +
+    '<div class="sub">What OpenStreetMap has for this course.</div>' +
+    '<div class="tblwrap"><table class="stats"><tbody>' +
+      row('Holes', n.holes + (span ? ' <span style="color:var(--mut)">(' + span + ')</span>' : '')) +
+      row('Greens outlined', n.greens) + row('Tee boxes', n.tees) + row('Par given', n.pars + ' of ' + n.holes) +
+      row('Bunkers', n.bunkers) + row('Water', n.water) +
+    '</tbody></table></div>' +
+    (conv.probs.length ? '<div class="note" style="color:var(--warmink)">' + conv.probs.map(esc).join('<br>') + '</div>' : '') +
+    (canLink ? '<label class="chk"><input type="checkbox" id="oiLink" checked> Use it for the round you are playing' + (r.course ? ' (' + esc(r.course) + ')' : '') + '</label>' : '') +
+    '<div id="oiConf"></div>' +
+    '<div class="row"><button class="btn ghost" id="cancel">Cancel</button><button class="btn pri" id="oiSave">Save course</button></div>');
+  var link = function(){ var x = el.querySelector('#oiLink'); return !!(x && x.checked); };
+  function conflicts(){
+    var t = osmTarget(f, link()), out = [];
+    if (!t || !t.greens) return out;
+    Object.keys(conv.holes).forEach(function(k){
+      var g = t.greens[k], gc = conv.holes[k].gc;
+      if (g && gc && g.src !== 'osm'){ var d = yd(distM(g, gc)); if (d > 10) out.push({n:+k, d:d}); }
+    });
+    return out;
+  }
+  function drawConf(){
+    var c = conflicts(), box = el.querySelector('#oiConf');
+    box.innerHTML = c.length ? '<div class="note">Greens you placed by hand are more than 10 yd from the mapped centre on ' +
+      c.map(function(x){ return 'hole ' + x.n + ' (' + r0(x.d) + ' yd)'; }).join(', ') + '. Yours are kept unless you tick this.</div>' +
+      '<label class="chk"><input type="checkbox" id="oiRepl"> Use the mapped green centres instead</label>' : '';
+  }
+  drawConf();
+  var lk = el.querySelector('#oiLink'); if (lk) lk.onchange = drawConf;
+  el.querySelector('#cancel').onclick = function(){ closeSheet(); };
+  el.querySelector('#oiSave').onclick = function(){
+    var rp = el.querySelector('#oiRepl');
+    var c = osmSave(f, conv, {link:link(), replace:!!(rp && rp.checked)});
+    closeSheet(true);
+    frameCourse(c);
+    toast(c.name + ': ' + plural(conv.counts.greens, 'green') + ' and ' + plural(conv.counts.tees, 'tee box', 'tee boxes') + ' saved. Every round here will use them.', 4500);
+  };
+}
+function osmSave(f, conv, o){
+  var c = osmTarget(f, o.link), r = active();
+  if (!c){ c = {id:uid(), name:conv.name || f.name, t:Date.now(), greens:{}}; S.courses.push(c); }
+  if ((!c.name || c.name === 'Course') && (conv.name || f.name)) c.name = conv.name || f.name;
+  c.osm = {type:f.type, id:f.id, t:Date.now()};
+  c.geo = conv.holes; c.greens = c.greens || {}; c.pars = c.pars || {};
+  Object.keys(conv.holes).forEach(function(k){
+    var hh = conv.holes[k], g = c.greens[k];
+    if (hh.gc && (!g || g.src === 'osm' || o.replace)) c.greens[k] = {lat:hh.gc.lat, lng:hh.gc.lng, t:Date.now(), src:'osm'};
+    if (hh.par && !c.pars[k]) c.pars[k] = hh.par;
+  });
+  if (o.link && r && !r.ended){ r.courseId = c.id; if (!(r.course || '').trim()) r.course = c.name; }
+  save();
+  return c;
+}
+window.__osmSave = osmSave;
+/* Show the whole course, without letting the phone's position pull the view back home. */
+function frameCourse(c){
+  var pts = [];
+  Object.keys(c.geo || {}).forEach(function(k){ c.geo[k].line.forEach(function(p){ pts.push(p); }); });
+  Object.keys(c.greens || {}).forEach(function(k){ pts.push([c.greens[k].lat, c.greens[k].lng]); });
+  renderHole(false);
+  if (pts.length >= 2){ follow = false; map.fitBounds(pts, fitOpts(17)); autoFitAt = Date.now(); }
+}
 
 /* ---------- the hole card: the whole story of a hole ----------
    Shots are measured by GPS; everything a phone cannot see - putts, bunkers, penalty strokes -
@@ -1488,6 +1893,9 @@ var pointIcon = L.divIcon({className:'', html:'<div class="ptdot"></div>', iconS
 var LONG_STAND_S = 15;
 var standIcon = L.divIcon({className:'', html:'<div class="stdot"></div>', iconSize:[20,20], iconAnchor:[10,10]});
 var flagIcon = L.divIcon({className:'', html:'<div class="flag">' + GFLAG + '</div>', iconSize:[30,30], iconAnchor:[15,15]});
+var teeIcon = L.divIcon({className:'', html:'<div class="teebox"></div>', iconSize:[12,12], iconAnchor:[6,6]});
+var teeOnIcon = L.divIcon({className:'', html:'<div class="teebox on"></div>', iconSize:[16,16], iconAnchor:[8,8]});
+var fbIcon = L.divIcon({className:'', html:'<div class="fbdot"></div>', iconSize:[12,12], iconAnchor:[6,6]});
 
 function fitPadding(){
   var el = $('#map'), wrap = $('#mapWrap');
@@ -1508,6 +1916,7 @@ function renderHole(fit){
   if (plan && planKey !== holeKey()) endPlan(true);
   holeLayer.clearLayers(); markers = {};
   var r = active(), h = curHole();
+  courseAttr(courseFor(false));
   $('#holeLabel').textContent = h ? 'Hole ' + h.n : 'No round';
   trailLine.setLatLngs(r ? getTrail(r).map(function(p){ return [p[0], p[1]]; }) : []);
   if (h){
@@ -1535,8 +1944,12 @@ function renderHole(fit){
       gm.on('click', function(){ openGreenEdit(h); });
       markers.green = gm;
     }
-    var cg = greenFor(h);
-    if (cg && !(placing && placing.n === h.n)){
+    var cg = greenFor(h), rc = courseFor(false), geo = geoOf(rc, h.n);
+    // the mapped green's edge and this hole's tee boxes, drawn quietly: the imagery shows the rest
+    if (geo && geo.green) L.polygon(geo.green, {color:'#ffffff', weight:1.5, opacity:0.85, fill:false, dashArray:'3 4', interactive:false}).addTo(holeLayer);
+    if (geo) geo.tees.forEach(function(t){ L.marker(t.c, {icon:teeIcon, interactive:false, keyboard:false}).addTo(holeLayer); });
+    if (!(geo && geo.green) && rc && rc.fb && rc.fb[h.n]) ['f', 'b'].forEach(function(k){ var q = rc.fb[h.n][k]; if (q) L.marker([q.lat, q.lng], {icon:fbIcon, interactive:false}).addTo(holeLayer); });
+    if (cg && !(placing && placing.n === h.n && placing.kind === 'green')){
       var cm = L.marker([cg.lat, cg.lng], {icon:greenIcon, zIndexOffset:900}).addTo(holeLayer);
       cm.bindTooltip('<span class="urot">' + greenLabel() + '</span>', {permanent:true, direction:'top', offset:[0,-15], className:'dtip p1'});
       cm.on('click', function(){ openCourseGreen(h); });
@@ -2203,6 +2616,7 @@ function endPlan(silent){
 function setAim(ll){ if (!plan) return; plan.aim = {lat:ll.lat, lng:ll.lng}; drawPlan(); renderPlanInfo(); }
 map.on('click', function(e){ if (placing){ placeGreenMarker(e.latlng); return; } if (plan) setAim(e.latlng); });
 map.on('moveend zoomend', relabel);
+window.__tapMap = function(lat, lng){ map.fire('click', {latlng:L.latLng(lat, lng)}); }; // exposed for testing
 
 function drawPlan(){
   if (!plan){ planLayer.clearLayers(); aimMarker = null; return; }
@@ -2282,8 +2696,9 @@ function renderPlanInfo(){
   var sug = d != null ? suggestClub(d) : null, sub = $('#planSub');
   if (fix && Date.now() - fix.t > STALE_FIX_MS) sub.textContent = 'GPS is ' + Math.round((Date.now() - fix.t) / 1000) + ' s old';
   else {
-    var lv = toGreenYd(plan.aim);
-    sub.textContent = (lv == null ? '' : 'leaves ' + r0(lv) + ' yd to the green · ') + patShort(plan.pat)
+    var lv = toGreenYd(plan.aim), h = curHole(), lf = h ? fcbFor(plan.aim, courseFor(false), h.n) : null;
+    var fbT = lf && lf.f != null && lf.b != null ? ' (F ' + r0(lf.f) + ' B ' + r0(lf.b) + ')' : '';
+    sub.textContent = (lv == null ? '' : 'leaves ' + r0(lv) + ' yd' + fbT + ' to the green · ') + patShort(plan.pat)
       + (sug ? ' · your ' + sug.club + ' median ' + r0(sug.median) + ' yd' : '');
   }
   Array.prototype.forEach.call($('#planClubs').querySelectorAll('.chip'), function(b){ b.classList.toggle('sug', !!sug && b.textContent === sug.club); });
@@ -3423,7 +3838,9 @@ var ICONS = {
   down:'<path d="M12 3.5v11.5M8 11l4 4 4-4M4 20.5h16"/>',
   up:'<path d="M12 15.5V4M8 8l4-4 4 4M4 20.5h16"/>',
   gear:'<circle cx="12" cy="12" r="3.2"/><path d="M12 2.6v2.2M12 19.2v2.2M4.6 7.3l1.9 1.1M17.5 15.6l1.9 1.1M4.6 16.7l1.9-1.1M17.5 8.4l1.9-1.1"/>',
-  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11.2V16M12 8h.01"/>'
+  info:'<circle cx="12" cy="12" r="9"/><path d="M12 11.2V16M12 8h.01"/>',
+  globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9s1.2-6.4 3.8-9z"/>',
+  route:'<circle cx="6" cy="18.5" r="2.2"/><circle cx="18" cy="5.5" r="2.2"/><path d="M8.2 18.5H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.8"/>'
 };
 function icon(n){ return '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[n] || '') + '</svg>'; }
 function mrow(id, ic, label, cls){
@@ -3444,6 +3861,39 @@ function msec(id, label, rows){
   return rows.length ? '<details class="msec" id="' + id + '"><summary>' + label + '</summary>' +
     '<div class="mgrp">' + rows.join('') + '</div></details>' : '';
 }
+/* A new round starts on a course you have already set up, picked by name rather than typed, so
+   its greens, pars and plan come with it. Nearest first. */
+function courseGap(c, at){
+  var best = Infinity;
+  if (at) Object.keys(c.greens || {}).forEach(function(k){ best = Math.min(best, distM(at, c.greens[k])); });
+  return best;
+}
+function coursesByDistance(){
+  var at = fix ? {lat:fix.lat, lng:fix.lng} : importCentre();
+  return S.courses.filter(function(c){ return Object.keys(c.greens || {}).length || c.geo; })
+    .map(function(c){ return {c:c, d:courseGap(c, at)}; }).sort(function(a, b){ return a.d - b.d; });
+}
+function startRoundOn(c, name){
+  var r = newRound(c ? c.name : name);
+  if (c) r.courseId = c.id;
+  save(); closeSheet(true); renderHole(true); keepAwake();
+  return r;
+}
+function openNewRound(){
+  var list = coursesByDistance();
+  function typed(){ var name = prompt('Course name (optional)', ''); if (name === null) return; startRoundOn(null, name.trim()); }
+  if (!list.length){ typed(); return; }
+  var el = openSheet('<h3>New round</h3><div class="sub">Where are you playing? Your saved courses, nearest first.</div>' +
+    '<div class="mgrp">' + list.map(function(x, i){
+      return '<button class="mrow" data-i="' + i + '">' + icon(x.c.osm ? 'globe' : 'flag') + '<span>' + esc(x.c.name || 'Course') +
+        (isFinite(x.d) ? '<br><small style="color:var(--mut);font-weight:600">' + ydLabel(yd(x.d)) + ' away</small>' : '') + '</span><span class="mchev">\u203a</span></button>';
+    }).join('') + '</div>' +
+    '<div class="stack"><button class="btn sec" id="nrOther">Another course</button><button class="btn ghost" id="close">Cancel</button></div>');
+  Array.prototype.forEach.call(el.querySelectorAll('.mrow'), function(b){ b.onclick = function(){ startRoundOn(list[+b.dataset.i].c); }; });
+  el.querySelector('#nrOther').onclick = function(){ closeSheet(true); typed(); };
+  el.querySelector('#close').onclick = function(){ closeSheet(); };
+}
+window.__openNewRound = openNewRound;
 function openMenu(){
   var r = active();
   var sc = r ? roundScore(r) : null;
@@ -3467,11 +3917,12 @@ function openMenu(){
       mtile('mEnd', r.ended ? 'play' : 'stop', r.ended ? 'Reopen round' : 'End round', 'warn')
     ].join('') + '</div>' : '') +
     msec('dCourse', 'Course', r ? [
+      mrow('mImport', 'globe', 'Import from OpenStreetMap'),
       curHole() ? mrow('mGreen', 'flag', 'Green for hole ' + curHole().n) : '',
       mrow('mGreens', 'target', 'Set up all the greens'),
       mrow('mCourse', 'pencil', 'Rename course'),
       mrow('mOffline', 'map', 'Offline maps')
-    ] : [mrow('mOffline', 'map', 'Offline maps')]) +
+    ] : [mrow('mImport', 'globe', 'Import from OpenStreetMap'), mrow('mOffline', 'map', 'Offline maps')]) +
     msec('dHistory', 'History', [
       mrow('mRounds', 'clock', 'Rounds'),
       mrow('mStats', 'chart', 'Club distances')
@@ -3490,11 +3941,7 @@ function openMenu(){
     '<div class="stack"><button class="btn ghost" id="close">Close</button></div>');
   function on(id, fn){ var b = el.querySelector('#' + id); if (b) b.onclick = fn; }
   on('mGuide', function(){ closeSheet(true); openGuide(); });
-  on('mNew', function(){
-    var name = prompt('Course name (optional)', '');
-    if (name === null) return;
-    newRound(name.trim()); closeSheet(true); renderHole(true); keepAwake();
-  });
+  on('mNew', function(){ closeSheet(true); openNewRound(); });
   on('mCourse', function(){
     var name = prompt('Course name', r.course || ''); if (name === null) return;
     r.course = name.trim();
@@ -3502,6 +3949,7 @@ function openMenu(){
     if (c && r.course) c.name = r.course;
     save(); closeSheet(true);
   });
+  on('mImport', function(){ closeSheet(true); openOsmImport(); });
   on('mGreen', function(){ var h = curHole(); closeSheet(true); if (h) openCourseGreen(h); });
   on('mGreens', function(){
     closeSheet(true);
@@ -3743,6 +4191,7 @@ function openGuide(){
       '<li><b>Your bag.</b> ' + k('☰') + ' then <i>Settings</i>: list your clubs in bag order.</li>' +
       '<li><b>Your patterns.</b> In Settings under <i>Dispersion patterns</i>, tap each club. Choose Arc (tee shots) or Circle/oval (approaches), set the total width and depth, then slide the split to match your miss. The presets cover fades and draws.</li>' +
       '<li><b>Sharp satellite (optional).</b> Paste a free ArcGIS key in Settings and pick <i>Sharp satellite (Esri)</i>.</li>' +
+      '<li><b>Import your course.</b> Scroll the map to it, then ' + k('☰') + ' <i>Course</i>, <i>Import from OpenStreetMap</i>. Where volunteers have mapped it, that fills in every green, with its real shape for front and back yardages, and the tee boxes. The import says exactly what it found; place anything missing by hand.</li>' +
       '<li><b>Save your course.</b> At home on Wi-Fi: zoom so the course fills the screen, then ' + k('☰') + ' <i>Offline maps</i> and <i>Save area on screen</i>. That imagery shows even with no signal.</li>' +
     '</ol>' +
 
