@@ -282,6 +282,14 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 .capBox .big{font-size:52px;font-weight:900}
 .capBox .stack{margin-top:14px}
 .pill.stale{color:#777}
+/* The shell is served from a cache, so a new version installs in the background and the page you
+   are looking at is still the old one. Nothing ever said so, which is why an update took two
+   opens and one open left you on the old build for the whole round. */
+#updBar{position:fixed;left:8px;right:8px;top:calc(env(safe-area-inset-top) + 8px);z-index:4200;
+ border:0;border-radius:13px;padding:12px 14px;background:var(--g2);color:#fff;font-size:14px;
+ font-weight:700;text-align:center;box-shadow:0 4px 18px rgba(0,0,0,.35);animation:fadeIn .25s var(--ease)}
+#updBar b{font-weight:900}
+#updBar:active{transform:scale(.98)}
 #toast{position:fixed;left:0;right:0;margin:0 auto;width:max-content;top:calc(env(safe-area-inset-top) + 64px);z-index:4000;background:#111;color:#fff;padding:12px 16px;border-radius:12px;font-weight:700;font-size:15px;max-width:calc(100% - 32px);box-shadow:0 4px 14px rgba(0,0,0,.35);text-align:center}
 .pin{width:28px;height:28px;border-radius:50%;background:#ff9800;border:3px solid #fff;color:#111;font-weight:900;font-size:14px;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.6)}
 .pin.ex{background:#9e9e9e}
@@ -472,6 +480,7 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
 </div>
 
 <div id="toast" hidden></div>
+<button id="updBar" hidden>A new version is ready · <b>tap to load it</b></button>
 <div id="resultCard" hidden>
   <div class="rcHead"><div><div id="rcMain">—</div><div id="rcSub" class="psub"></div></div><div class="rcActs"><button id="rcTagBtn" class="link" hidden>Tag it</button><button id="rcUndo" class="link">Undo</button></div></div>
   <div id="rcAsk" hidden><div class="clab" style="width:auto;margin-bottom:4px">What did you hit?</div><div class="chips" id="rcClubs"></div></div>
@@ -587,7 +596,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.27.0', SCHEMA = 8;
+var APP_VERSION = '1.28.0', SCHEMA = 8;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', localSources:[], wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -5014,10 +5023,37 @@ function daysLeft(a){ var s = areaSrc(a); return s.ttl ? Math.max(0, Math.ceil((
 var offlineOK = ('caches' in window) && ('serviceWorker' in navigator) && window.isSecureContext;
 var dl = null; // active download {cancel}
 
+/* An update is offered, never forced: reloading mid-round would throw away whatever sheet or
+   plan is open. Tapping it is the only thing that reloads. */
+function showUpdateReady(){
+  var bar = $('#updBar'); if (!bar || !bar.hidden) return;
+  bar.hidden = false;
+  bar.onclick = function(){ bar.hidden = true; location.reload(); };
+}
+function watchWorker(reg){
+  var sw = reg.installing || reg.waiting;
+  if (reg.waiting && navigator.serviceWorker.controller){ showUpdateReady(); return; }
+  if (!sw) return;
+  sw.addEventListener('statechange', function(){
+    // a worker reaching installed while one is already in charge means this is an update,
+    // not the first ever load
+    if (sw.state === 'installed' && navigator.serviceWorker.controller) showUpdateReady();
+  });
+}
 function registerSW(){
   if (!offlineOK) return;
-  navigator.serviceWorker.register('sw.js').catch(function(){ offlineOK = false; });
+  navigator.serviceWorker.register('sw.js').then(function(reg){
+    watchWorker(reg);
+    reg.addEventListener('updatefound', function(){ watchWorker(reg); });
+    // coming back to the app is the moment worth re-checking: a phone left on a tee for an
+    // hour never asks otherwise
+    document.addEventListener('visibilitychange', function(){
+      if (document.visibilityState === 'visible') reg.update().catch(function(){});
+    });
+    setInterval(function(){ reg.update().catch(function(){}); }, 30 * 60 * 1000);
+  }).catch(function(){ offlineOK = false; });
 }
+window.__showUpdateReady = showUpdateReady;
 
 function downloadArea(srcName, b, onProgress){
   var src = srcFor(srcName), tiles = tilesFor(b, src.zmin, src.zmax), i = 0, done = 0, ok = 0, bytes = 0, netErr = 0, httpErr = 0;
