@@ -31,6 +31,9 @@ self.addEventListener('fetch', function(e){
   var req = e.request;
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
+  // Carry (./carry/) is a separate app with its own worker: never serve Shot Tracker's page for it,
+  // and never let its page overwrite the stored copy of index.html
+  if (url.origin === self.location.origin && /\/carry(\/|$)/.test(url.pathname)) return;
   if (url.pathname.indexOf('/USGSImageryOnly/MapServer/tile/') >= 0){ e.respondWith(usgsTile(req)); return; }
   if (url.pathname.indexOf('/v4/mapbox.satellite/') >= 0){ e.respondWith(mapboxTile(req, url)); return; }
   if (url.origin !== self.location.origin && STATIC.indexOf(req.url) < 0 && NOT_LOCAL.indexOf(url.hostname) < 0){ e.respondWith(localTile(req)); return; }

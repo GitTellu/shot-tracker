@@ -1,0 +1,99 @@
+/* Carry. Tokens and sizes follow the Claude Design prototype (Carry Prototype.dc.html). */
+:root{
+  --page:#EEEAE0; --bg:#F7F5F0; --card:#fff; --ink:#1F2A24; --mut:#6E7670; --line:#E4DECF; --line2:#F0EBE0;
+  --acc:#4A7C6F; --acc-08:rgba(74,124,111,0.08); --acc-14:rgba(74,124,111,0.14);
+  --pos:#5A8C72; --neg:#B85447; --warm:#D9846B; --warm-12:rgba(217,132,107,0.12); --warm-16:rgba(217,132,107,0.16);
+  --dk:#1F2A24; --dk-mut:#9AA39D; --dk-bar:#3A453E; --dk-hi:#8FC2A5; --dk-neg:#E0A08C;
+  --serif:'DM Serif Display',Georgia,serif;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--page);font-family:Manrope,system-ui,sans-serif;color:var(--ink);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+a{color:var(--acc);text-decoration:none}a:hover{color:var(--warm)}
+button{font-family:inherit;color:inherit;border:none;background:none;cursor:pointer;touch-action:manipulation}
+input{font-family:inherit;color:inherit}
+[hidden]{display:none!important}
+.num{font-variant-numeric:tabular-nums}
+
+/* The app fills a phone. On a larger screen it sits in the prototype's 390 x 844 frame. */
+#phone{height:100vh;height:100dvh;background:var(--bg);display:flex;flex-direction:column;position:relative;overflow:hidden;max-width:480px;margin:0 auto}
+@media (min-width:600px) and (min-height:900px){
+  body{display:flex;align-items:center;justify-content:center;padding:32px 16px}
+  #phone{width:390px;height:844px;border-radius:44px;border:1px solid var(--line);box-shadow:0 8px 24px -8px rgba(74,124,111,0.14);margin:0}
+}
+#topbar{height:48px;flex:none;display:flex;align-items:center;justify-content:space-between;padding:env(safe-area-inset-top) 28px 0;font-size:14px;font-weight:700;box-sizing:content-box}
+#gps{font-size:12px;color:var(--mut)}
+#gps.good{color:var(--acc)} #gps.poor{color:var(--neg)}
+#main{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+#screen{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column}
+.scr{flex:1;display:flex;flex-direction:column}
+
+/* type */
+.lbl{font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--mut)}
+.h{font-family:var(--serif);font-weight:400;font-size:30px;line-height:1.1}
+.mut{color:var(--mut)}
+.sub{font-size:13px;color:var(--mut);line-height:1.5}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+
+/* blocks */
+.pad{padding:4px 20px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px}
+.m{margin:14px 20px 0}
+.tint{padding:14px 16px;border-radius:12px;background:var(--acc-08)}
+.warmtint{padding:14px 16px;border-radius:12px;background:var(--warm-12)}
+.dark{background:var(--dk);color:var(--bg);border-radius:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-variant-numeric:tabular-nums}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+.stat .k{font-size:10px;font-weight:700;color:var(--mut)} .stat .v{font-size:18px;font-weight:800} .stat .s{font-size:11px;color:var(--mut)}
+.foot{margin-top:auto;padding:16px 20px}
+.rows>*{border-bottom:1px solid var(--line2)} .rows>*:last-child{border-bottom:none}
+
+/* buttons */
+.btn{height:56px;border-radius:14px;font-weight:800;font-size:15px;width:100%}
+.btn.pri{background:var(--ink);color:#fff}
+.btn.go{background:var(--acc);color:#fff}
+.btn.sec{border:1px solid var(--line);background:#fff;font-weight:700}
+.btn:disabled{opacity:0.45;cursor:default}
+.btn.big{height:60px;font-size:16px;letter-spacing:0.04em}
+.link{font-size:13px;font-weight:700;color:var(--acc)}
+.chip{min-width:44px;height:44px;padding:0 10px;border-radius:10px;border:1px solid var(--line);background:#fff;font-weight:700;font-size:14px}
+.chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.pill{height:40px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:transparent;font-weight:600;font-size:13px}
+.pill.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.wrap{display:flex;gap:6px;flex-wrap:wrap}
+
+/* inputs (bag, names) */
+.in{height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:0 10px;font-size:15px;font-weight:700;width:100%}
+.in.numin{text-align:right;font-variant-numeric:tabular-nums}
+
+/* bottom bar */
+#nav{height:76px;flex:none;border-top:1px solid var(--line);background:var(--page);display:grid;grid-template-columns:repeat(4,1fr);padding:0 8px calc(14px + env(safe-area-inset-bottom));box-sizing:content-box}
+#nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-size:12px;font-weight:700;color:var(--mut)}
+#nav button span{width:24px;height:3px;border-radius:2px;background:transparent}
+#nav button.on{color:var(--ink)} #nav button.on span{background:var(--acc)}
+
+/* map */
+#mapWrap{position:absolute;inset:0;background:#7FA38A;overflow:hidden}
+#map{position:absolute;inset:0;background:#7FA38A;cursor:crosshair}
+#mapUi{position:absolute;inset:0;pointer-events:none;z-index:500}
+#mapUi>*{pointer-events:auto}
+.mtop{position:absolute;left:0;right:0;top:0;padding:4px 16px 0;display:flex;justify-content:space-between;pointer-events:none!important}
+.mtop>*{pointer-events:auto}
+.glass{background:rgba(255,255,255,0.94);border-radius:12px}
+.msheet{position:absolute;left:12px;right:12px;bottom:12px;background:var(--bg);border-radius:20px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
+.youdot{width:22px;height:22px;border-radius:50%;background:var(--acc);border:3px solid #fff;box-shadow:0 0 0 6px rgba(74,124,111,0.3)}
+.pindot{width:10px;height:10px;border-radius:50%;background:var(--neg);border:2px solid #fff}
+.tgt{width:18px;height:18px;border-radius:50%;background:#fff;border:3px solid var(--ink)}
+.tgtlbl{padding:5px 9px;border-radius:8px;background:var(--ink);color:#fff;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.leaflet-container{font-family:Manrope,system-ui,sans-serif}
+.leaflet-control-attribution{font-size:9px}
+
+/* GPS capture overlay */
+#capture{position:absolute;inset:0;background:rgba(31,42,36,0.35);display:flex;align-items:flex-end;z-index:1000}
+.capbox{margin:12px;width:100%;background:var(--bg);border-radius:20px;padding:18px;display:flex;flex-direction:column;gap:8px}
+#capBig{font-size:56px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+#capInfo{font-size:13px;line-height:1.45}
+.caprow{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+.caprow .btn{height:50px}
+
+#toast{position:absolute;left:16px;right:16px;bottom:96px;background:var(--ink);color:#fff;border-radius:12px;padding:12px 14px;font-size:13px;font-weight:600;line-height:1.4;z-index:1100}

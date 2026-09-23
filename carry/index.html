@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F7F5F0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Carry">
+<title>Carry</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="phone">
+  <div id="topbar"><span id="brand">Carry</span><span id="gps">GPS off</span></div>
+  <div id="main">
+    <div id="screen"></div>
+    <div id="mapWrap" hidden>
+      <div id="map"></div>
+      <div id="mapUi"></div>
+    </div>
+  </div>
+  <nav id="nav" hidden></nav>
+  <div id="capture" hidden>
+    <div class="capbox">
+      <span class="lbl" id="capTitle">Marking your ball</span>
+      <span id="capBig">3</span>
+      <span id="capInfo" class="mut"></span>
+      <div class="caprow"><button class="btn sec" id="capCancel">Cancel</button><button class="btn pri" id="capGo" hidden>Use it</button></div>
+    </div>
+  </div>
+  <div id="toast" hidden></div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="geo.js"></script>
+<script src="baseline.js"></script>
+<script src="sg.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
