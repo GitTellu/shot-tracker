@@ -1,5 +1,5 @@
 /* Shot Tracker service worker: keeps the app and saved satellite imagery available offline. */
-var APP_CACHE = 'st-app-v35';
+var APP_CACHE = 'st-app-v36';
 var USGS_CACHE = 'st-tiles-usgs-v1';
 var MAPBOX_CACHE = 'st-tiles-mapbox-v1';
 var LOCAL_CACHE = 'st-tiles-local-v1';
