@@ -164,7 +164,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .pmTgt .lab{font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--mut)}
 .pmTgt .chip{padding:6px 11px;font-size:16px}
 .pmTgt b{min-width:20px;text-align:center;font-size:19px;font-variant-numeric:tabular-nums}
-#pmDone{height:40px;width:auto;flex:none;padding:0 16px;font-size:15px}
+#pmNext{height:40px;width:auto;flex:none;padding:0 14px;font-size:15px}
+#pmClose{flex:none;padding:6px 0 6px 6px}
+#pmClose svg{width:21px;height:21px;stroke:var(--gink);stroke-width:2.1;fill:none;stroke-linecap:round;display:block}
 #pmSub{white-space:pre-line;line-height:1.35;margin-top:2px;min-height:2.7em}
 #pmTees{margin-top:4px}
 #pmBox .planCtl .chip:disabled{opacity:.4}
@@ -426,8 +428,9 @@ table.stats th{font-size:12px;color:var(--mut);text-transform:uppercase}
   <div id="pmBox" hidden>
     <div class="planHead">
       <div id="pmNum" class="pnum">Hole 1</div>
-      <div class="pmTgt"><span class="lab">Target</span><button id="pmScMinus" class="chip" aria-label="Lower target score">&minus;</button><b id="pmScore">&mdash;</b><button id="pmScPlus" class="chip" aria-label="Higher target score">+</button></div>
-      <button id="pmDone" class="btn pri">Done</button>
+      <div class="pmTgt"><span class="lab">Goal</span><button id="pmScMinus" class="chip" aria-label="Lower score goal">&minus;</button><b id="pmScore">&mdash;</b><button id="pmScPlus" class="chip" aria-label="Higher score goal">+</button></div>
+      <button id="pmNext" class="btn pri">Next &#8250;</button>
+      <button id="pmClose" class="link ichip" aria-label="Stop planning"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <div class="psub" id="pmSub"></div>
     <div class="chips" id="pmTees"></div>
@@ -548,7 +551,7 @@ function toast(msg, ms){
 }
 
 /* ---------- state ---------- */
-var APP_VERSION = '1.25.2', SCHEMA = 7;
+var APP_VERSION = '1.25.3', SCHEMA = 7;
 function defaults(){ return {v:1, schema:SCHEMA, settings:{clubs:DEFAULT_CLUBS.slice(), arcgisKey:'', mapboxToken:'', patterns:{}, avgSeconds:4, basemap:'osm', wake:false, peek:false, theme:'system'}, rounds:[], activeId:null, playingId:null, offlineAreas:[], courses:[]}; }
 function normalize(j){
   var d = defaults();
@@ -3202,7 +3205,7 @@ function enterPlanMode(c, n){
   $('#pmBox').hidden = false; $('#actions').hidden = true; $('#planBox').hidden = true; applyPeek();
   setRotation('auto', true);
   renderHole(true);
-  toast(c.greens && c.greens[pm.n] ? 'Planning ' + (c.name || 'the course') + '. Tap the map to place a target; the arrows at the top step through the holes.'
+  toast(c.greens && c.greens[pm.n] ? 'Planning ' + (c.name || 'the course') + '. Tap the map to place a target, set your score goal, then Next for the next hole. It saves as you go.'
                                    : 'No green on this hole yet: step to a hole with one, or place it first.', 5000);
 }
 function exitPlanMode(){
@@ -3214,6 +3217,9 @@ function exitPlanMode(){
   renderHole(true);
   toast(planned ? 'Plan saved: ' + plural(planned, 'hole') + ' at ' + (c.name || 'this course') + '. AIM loads it when you play.' : 'Nothing planned yet.', 4000);
 }
+/* The plan saves as you go, so Next is simply the next hole, and after the last hole it is Finish. */
+function pmLastHole(){ var top = 18; Object.keys(pm.c.geo || {}).forEach(function(k){ top = Math.max(top, +k); }); return top; }
+function pmNext(){ if (pm.n >= pmLastHole()) exitPlanMode(); else pmStep(1); }
 function pmStep(d){
   if (!pm) return;
   var top = 18; Object.keys(pm.c.geo || {}).forEach(function(k){ top = Math.max(top, +k); });
@@ -3339,6 +3345,7 @@ function renderPmBox(){
   var par = c.pars && c.pars[n], start = planStartOf(c, n), tee = teeFor(c, n), len = holeLenYd(c, n, start);
   var shots = ph ? ph.shots : [], sel = pm.sel >= 0 ? pm.sel : shots.length - 1, s = shots[sel];
   $('#pmNum').textContent = 'Hole ' + n;
+  $('#pmNext').innerHTML = n >= pmLastHole() ? 'Finish' : 'Next &#8250;';
   $('#pmScore').textContent = ph && ph.score != null ? ph.score : (par || '—');
   var line1 = !g ? 'No green on this hole yet. Place it or import the course to plan it.'
     : !start ? 'Tap the map where you will tee off.'
@@ -3427,16 +3434,16 @@ function openPlanReview(r){
   var head = '<div class="tblwrap"><table class="stats"><tbody>' +
     '<tr><td>Holes played with a plan</td><td>' + t.planned + '</td></tr>' +
     '<tr><td>Played as planned</td><td>' + t.followed + ' of ' + t.planned + '</td></tr>' +
-    (t.scored ? '<tr><td>Against your target score</td><td>' + signed(t.vs) + '</td></tr>' : '') +
+    (t.scored ? '<tr><td>Against your score goals</td><td>' + signed(t.vs) + '</td></tr>' : '') +
     '<tr><td>Planned shots inside the pattern</td><td>' + (t.shots ? t.inside + ' of ' + t.shots : '—') + '</td></tr>' +
     '<tr><td>Club changed from the plan</td><td>' + plural(t.clubCh, 'time') + '</td></tr>' +
     '<tr><td>Target moved on the day</td><td>' + plural(t.aimCh, 'time') + '</td></tr>' +
     '</tbody></table></div>' +
-    (t.scored ? '<div class="note">Against your target score: ' + [t.fol.n ? '<b>stuck to the plan</b> ' + avg(t.fol) : '', t.dev.n ? '<b>changed it</b> ' + avg(t.dev) : ''].filter(Boolean).join('; ') + '. ' +
+    (t.scored ? '<div class="note">Against your score goals: ' + [t.fol.n ? '<b>stuck to the plan</b> ' + avg(t.fol) : '', t.dev.n ? '<b>changed it</b> ' + avg(t.dev) : ''].filter(Boolean).join('; ') + '. ' +
       (t.fol.n + t.dev.n < 8 ? 'That is a handful of holes, so read it as a hint, not a verdict: it firms up over rounds.' : '') + '</div>' : '');
   var rows = rep.rows.map(function(x){
     var par = parForRound(r, x.h.n);
-    var top = 'Hole ' + x.h.n + (par ? ' · Par ' + par : '') + (x.rp.score != null ? ' · target ' + x.rp.score : '') +
+    var top = 'Hole ' + x.h.n + (par ? ' · Par ' + par : '') + (x.rp.score != null ? ' · goal ' + x.rp.score : '') +
       (x.sc != null ? ' · scored ' + x.sc + (x.rp.score != null ? ' (' + signed(x.sc - x.rp.score) + ')' : '') : ' · not finished');
     var lines = x.shots.map(function(s){
       if (!s.s) return (s.k + 1) + '. ' + esc(s.ps.club) + ': not needed';
@@ -4892,7 +4899,7 @@ function openGuide(){
       '<li><b>Your patterns.</b> In Settings under <i>Dispersion patterns</i>, tap each club. Choose Arc (tee shots) or Circle/oval (approaches), set the total width and depth, then slide the split to match your miss. The presets cover fades and draws.</li>' +
       '<li><b>Sharp satellite (optional).</b> Paste a free ArcGIS key in Settings and pick <i>Sharp satellite (Esri)</i>.</li>' +
       '<li><b>Import your course.</b> Scroll the map to it, then ' + k('☰') + ' <i>Course</i>, <i>Import from OpenStreetMap</i>. Where volunteers have mapped it, that fills in every green, with its real shape for front and back yardages, and the tee boxes. The import says exactly what it found; place anything missing by hand.</li>' +
-      '<li><b>Plan the round (optional).</b> ' + k('☰') + ' <i>Course</i>, <i>Plan the round</i>. Pick your tee box on each hole, tap the map for each target and choose the club: its pattern is drawn from where the last shot leaves you, down to the green. Set the score you are playing for. On the course ' + k('AIM', 'plan') + ' loads the planned shot from wherever your ball really is, and <i>Plan vs round</i> afterwards shows where the plan held and where it did not.</li>' +
+      '<li><b>Plan the round (optional).</b> ' + k('☰') + ' <i>Course</i>, <i>Plan the round</i>. Pick your tee box on each hole, tap the map for each target and choose the club: its pattern is drawn from where the last shot leaves you, down to the green. Set your score goal for the hole, then <i>Next</i>; it saves as you go. On the course ' + k('AIM', 'plan') + ' loads the planned shot from wherever your ball really is, and <i>Plan vs round</i> afterwards shows where the plan held and where it did not.</li>' +
       '<li><b>Save your course.</b> At home on Wi-Fi: zoom so the course fills the screen, then ' + k('☰') + ' <i>Offline maps</i> and <i>Save area on screen</i>. That imagery shows even with no signal.</li>' +
     '</ol>' +
 
@@ -4994,7 +5001,8 @@ $('#nextHole').onclick = function(){
   save(); renderHole(true);
 };
 $('#holeLabel').onclick = function(){ if (pm) openPlanPicker(); else openHolePicker(); };
-$('#pmDone').onclick = exitPlanMode;
+$('#pmNext').onclick = function(){ if (pm) pmNext(); };
+$('#pmClose').onclick = exitPlanMode;
 $('#pmAdd').onclick = function(){ if (pm) pmAdd(); };
 $('#pmDel').onclick = function(){ if (pm) pmDel(); };
 $('#pmScMinus').onclick = function(){ if (pm) pmScore(-1); };
